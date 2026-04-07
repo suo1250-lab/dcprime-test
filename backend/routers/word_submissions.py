@@ -3,12 +3,12 @@ import json
 import shutil
 from pathlib import Path
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from database import get_db
+from database import get_db, SessionLocal
 from models import WordTest, WordSubmission, WordSubmissionItem, Student, Class
 from config import GRADED, UPLOAD_DIR, KOREAN_FONT_PATH
 from ai_utils import ai_call
@@ -177,9 +177,69 @@ def grade_with_ai(image_path: str, items: list) -> list:
         return []
 
 
+# ── 백그라운드 AI 채점 ─────────────────────────────────────────
+def _bg_grade(submission_id: int, image_path: str, items_data: list, student_name: str):
+    """AI 채점 + PDF 저장을 백그라운드에서 처리"""
+    db = SessionLocal()
+    try:
+        submission = db.query(WordSubmission).filter(WordSubmission.id == submission_id).first()
+        if not submission:
+            return
+
+        ai_results = grade_with_ai(image_path, items_data)
+        if not ai_results:
+            return
+
+        ai_map = {r["item_no"]: r for r in ai_results}
+        score  = 0
+        for item_data in items_data:
+            r          = ai_map.get(item_data["item_no"], {})
+            is_correct = r.get("is_correct", False)
+            if is_correct:
+                score += 1
+            db.add(WordSubmissionItem(
+                submission_id=submission_id,
+                item_no=item_data["item_no"],
+                question=item_data["question"],
+                correct_answer=item_data["answer"],
+                student_answer=r.get("student_answer", ""),
+                is_correct=is_correct,
+            ))
+        submission.score  = score
+        submission.status = "pending_review"
+        db.flush()
+
+        # NAS PDF 저장
+        try:
+            db_student = db.query(Student).filter(Student.name == student_name).first()
+            class_name = ""
+            if db_student and db_student.class_id:
+                cls = db.get(Class, db_student.class_id)
+                if cls:
+                    class_name = cls.name
+            saved_items = db.query(WordSubmissionItem).filter(
+                WordSubmissionItem.submission_id == submission_id
+            ).all()
+            pdf_bytes = _generate_result_pdf_b(image_path, submission, saved_items)
+            nas_path  = _save_to_nas(pdf_bytes, student_name, class_name)
+            if nas_path:
+                submission.image_path = nas_path
+        except Exception as e:
+            print(f"[Submission] PDF 저장 실패: {e}")
+
+        db.commit()
+        print(f"[Submission] 백그라운드 채점 완료: sub_id={submission_id} score={score}")
+    except Exception as e:
+        db.rollback()
+        print(f"[Submission] 백그라운드 채점 실패: {e}")
+    finally:
+        db.close()
+
+
 # ── 제출 엔드포인트 ───────────────────────────────────────────
 @router.post("", status_code=201)
 async def submit(
+    background_tasks: BackgroundTasks,
     word_test_id: int   = Form(...),
     student_name: str   = Form(...),
     grade: str          = Form(...),
@@ -205,91 +265,22 @@ async def submit(
     with open(image_path, "wb") as f:
         shutil.copyfileobj(image.file, f)
     submission.image_path = str(image_path)
+    db.commit()
+    db.refresh(submission)
 
-    items_data  = [
+    # AI 채점은 백그라운드에서 처리 (즉시 응답)
+    items_data = [
         {"item_no": item.item_no, "question": item.question, "answer": item.answer}
         for item in test.items
     ]
-    ai_results = grade_with_ai(str(image_path), items_data)
+    background_tasks.add_task(_bg_grade, submission.id, str(image_path), items_data, student_name)
 
-    if ai_results:
-        ai_map = {r["item_no"]: r for r in ai_results}
-        score  = 0
-        for item in test.items:
-            r          = ai_map.get(item.item_no, {})
-            is_correct = r.get("is_correct", False)
-            if is_correct:
-                score += 1
-            db.add(WordSubmissionItem(
-                submission_id=submission.id,
-                item_no=item.item_no,
-                question=item.question,
-                correct_answer=item.answer,
-                student_answer=r.get("student_answer", ""),
-                is_correct=is_correct,
-            ))
-        submission.score  = score
-        submission.status = "pending_review"
-
-        # ── NAS 채점 결과 PDF 저장 ──────────────────────────────
-        try:
-            # 학생 DB에서 반 이름 조회 (없으면 빈 문자열)
-            db_student = db.query(Student).filter(Student.name == student_name).first()
-            class_name = ""
-            if db_student and db_student.class_id:
-                cls = db.get(Class, db_student.class_id)
-                if cls:
-                    class_name = cls.name
-
-            db.flush()  # submission.items 조회 가능하게 flush
-
-            saved_items = db.query(WordSubmissionItem).filter(
-                WordSubmissionItem.submission_id == submission.id
-            ).all()
-
-            # === [A안] 원본 이미지만 PDF 변환 ===
-            # pdf_bytes = _generate_result_pdf_a(str(image_path))
-
-            # === [B안] 원본 이미지 + 채점 결과 요약 페이지 ===
-            pdf_bytes = _generate_result_pdf_b(str(image_path), submission, saved_items)
-
-            nas_path = _save_to_nas(pdf_bytes, student_name, class_name)
-            if nas_path:
-                submission.image_path = nas_path
-                print(f"[Submission] NAS 저장: {nas_path}")
-        except Exception as pdf_err:
-            # PDF 생성/저장 실패해도 채점 결과 자체는 DB에 보존
-            print(f"[Submission] PDF 저장 실패 (채점 결과는 DB에 저장됨): {pdf_err}")
-        # ────────────────────────────────────────────────────────
-
-    else:
-        for item in test.items:
-            db.add(WordSubmissionItem(
-                submission_id=submission.id,
-                item_no=item.item_no,
-                question=item.question,
-                correct_answer=item.answer,
-                student_answer=None,
-                is_correct=None,
-            ))
-
-    db.commit()
-    db.refresh(submission)
     return {
-        "id":       submission.id,
-        "status":   submission.status,
-        "score":    submission.score,
-        "total":    submission.total,
-        "items": [
-            {
-                "item_no":        i.item_no,
-                "question":       i.question,
-                "correct_answer": i.correct_answer,
-                "student_answer": i.student_answer,
-                "is_correct":     i.is_correct,
-            }
-            for i in submission.items
-        ],
+        "id":     submission.id,
+        "status": "pending_manual",
+        "score":  None,
+        "total":  submission.total,
+        "items":  [],
     }
 
 

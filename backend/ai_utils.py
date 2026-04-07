@@ -10,6 +10,7 @@ from config import GEMINI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY
 
 GEMINI_MODEL  = "gemini-2.5-pro-exp-03-25"
 CLAUDE_MODEL  = "claude-sonnet-4-6"
+CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
 
 
 def _gemini_client():
@@ -35,8 +36,8 @@ def _pdf_to_pil_images(file_path: str) -> list:
     return [Image.open(io.BytesIO(b)) for b in _pdf_to_png_bytes_list(file_path)]
 
 
-def ai_text_call(prompt: str, max_tokens: int = 3000) -> str:
-    """이미지 없이 텍스트만으로 AI 호출"""
+def ai_text_call(prompt: str, max_tokens: int = 3000, fast: bool = False) -> str:
+    """이미지 없이 텍스트만으로 AI 호출. fast=True면 haiku 사용."""
     if not GEMINI_API_KEY and not XAI_API_KEY and not ANTHROPIC_API_KEY:
         raise ValueError("AI API 키가 설정되지 않았습니다")
 
@@ -59,14 +60,15 @@ def ai_text_call(prompt: str, max_tokens: int = 3000) -> str:
     else:
         import anthropic
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        model = CLAUDE_FAST_MODEL if fast else CLAUDE_MODEL
         resp = client.messages.create(
-            model=CLAUDE_MODEL, max_tokens=max_tokens,
+            model=model, max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
         return resp.content[0].text.strip()
 
 
-def ai_call(file_path: str, prompt: str, max_tokens: int = 2000) -> str:
+def ai_call(file_path: str, prompt: str, max_tokens: int = 2000, fast: bool = False) -> str:
     if not GEMINI_API_KEY and not XAI_API_KEY and not ANTHROPIC_API_KEY:
         raise ValueError("AI API 키가 설정되지 않았습니다")
 
@@ -77,7 +79,7 @@ def ai_call(file_path: str, prompt: str, max_tokens: int = 2000) -> str:
     elif XAI_API_KEY:
         return _call_grok(file_path, prompt, max_tokens, is_pdf)
     else:
-        return _call_claude(file_path, prompt, max_tokens, is_pdf)
+        return _call_claude(file_path, prompt, max_tokens, is_pdf, fast=fast)
 
 
 def _call_gemini(file_path: str, prompt: str, is_pdf: bool) -> str:
@@ -127,7 +129,7 @@ def _call_grok(file_path: str, prompt: str, max_tokens: int, is_pdf: bool) -> st
     return resp.choices[0].message.content.strip()
 
 
-def _call_claude(file_path: str, prompt: str, max_tokens: int, is_pdf: bool) -> str:
+def _call_claude(file_path: str, prompt: str, max_tokens: int, is_pdf: bool, fast: bool = False) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -157,8 +159,9 @@ def _call_claude(file_path: str, prompt: str, max_tokens: int, is_pdf: bool) -> 
             })
 
     content.append({"type": "text", "text": prompt})
+    model = CLAUDE_FAST_MODEL if fast else CLAUDE_MODEL
     resp = client.messages.create(
-        model=CLAUDE_MODEL, max_tokens=max_tokens,
+        model=model, max_tokens=max_tokens,
         messages=[{"role": "user", "content": content}],
     )
     return resp.content[0].text.strip()

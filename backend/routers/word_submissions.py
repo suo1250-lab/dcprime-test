@@ -237,6 +237,14 @@ def _bg_grade(submission_id: int, image_path: str, items_data: list, student_nam
 
 
 # ── 제출 엔드포인트 ───────────────────────────────────────────
+# [NOTE] POST /word-submissions (웹 직접 제출)
+# 현재 운영 방식은 NAS watcher 자동채점(watcher.py)이 메인이며,
+# 이 엔드포인트는 요청에 의해 유지되지만 실제로는 거의 사용되지 않음.
+#
+# 채점 로직 개선(이름 매칭, 유사도 채점, 모델 변경 등) 시
+# watcher.py와 이 파일(_bg_grade)이 별도로 관리되므로
+# 관계없는 수정은 이 엔드포인트를 건드리지 말 것.
+# 대대적인 채점 로직 변경 시에는 양쪽 모두 동기화 필요.
 @router.post("", status_code=201)
 async def submit(
     background_tasks: BackgroundTasks,

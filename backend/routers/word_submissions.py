@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import List, Optional
 from database import get_db, SessionLocal
@@ -344,7 +344,7 @@ def export_excel(word_test_id: Optional[int] = None, db: Session = Depends(get_d
 
 @router.get("")
 def list_submissions(word_test_id: Optional[int] = None, status: Optional[str] = None, db: Session = Depends(get_db)):
-    q = db.query(WordSubmission)
+    q = db.query(WordSubmission).options(joinedload(WordSubmission.word_test))
     if word_test_id:
         q = q.filter(WordSubmission.word_test_id == word_test_id)
     if status:

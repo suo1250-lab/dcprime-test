@@ -2,6 +2,7 @@ import base64
 import json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List
 from datetime import date
@@ -53,8 +54,14 @@ class WordTestDetailOut(BaseModel):
 
 @router.get("", response_model=List[WordTestOut])
 def list_word_tests(db: Session = Depends(get_db)):
-    tests = db.query(WordTest).order_by(WordTest.test_date.desc()).all()
-    return [WordTestOut(id=t.id, title=t.title, grade=t.grade, direction=t.direction, test_date=t.test_date, item_count=len(t.items)) for t in tests]
+    rows = (
+        db.query(WordTest, func.count(WordTestItem.id).label("cnt"))
+        .outerjoin(WordTestItem, WordTestItem.word_test_id == WordTest.id)
+        .group_by(WordTest.id)
+        .order_by(WordTest.test_date.desc())
+        .all()
+    )
+    return [WordTestOut(id=t.id, title=t.title, grade=t.grade, direction=t.direction, test_date=t.test_date, item_count=cnt) for t, cnt in rows]
 
 @router.post("", response_model=WordTestDetailOut)
 def create_word_test(body: WordTestIn, db: Session = Depends(get_db)):

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, Student, Class } from "@/lib/api";
 import Link from "next/link";
 
@@ -28,10 +28,13 @@ export default function StudentsPage() {
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const classMap = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
+
   const load = () => {
     const q = filterGrade ? `?grade=${filterGrade}` : "";
     apiFetch<Student[]>(`/students${q}`).then(setStudents).catch(() => {});
-    apiFetch<Class[]>("/classes").then(setClasses).catch(() => {});
+    if (classes.length === 0)
+      apiFetch<Class[]>("/classes").then(setClasses).catch(() => {});
   };
 
   useEffect(() => { load(); }, [filterGrade]);
@@ -257,7 +260,7 @@ export default function StudentsPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{s.grade}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.school ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{classes.find((c) => c.id === s.class_id)?.name ?? <span className="text-gray-400 dark:text-gray-500">미배정</span>}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{classMap.get(s.class_id ?? 0)?.name ?? <span className="text-gray-400 dark:text-gray-500">미배정</span>}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.phone ?? "-"}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.teacher ?? "-"}</td>
                     <td className="px-4 py-3 whitespace-nowrap">

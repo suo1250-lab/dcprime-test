@@ -84,7 +84,7 @@ export default function WordSubmissionsPage() {
         method: "PUT",
         body: JSON.stringify({ items: editItems, student_name: editName }),
       });
-      load();
+      setSubmissions((prev) => prev.filter((s) => s.id !== selectedId));
       closeDetail();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "확정 실패");

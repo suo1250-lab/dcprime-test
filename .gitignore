@@ -34,3 +34,6 @@ Thumbs.db
 # Large archives
 *.tar.gz
 *.tar
+
+# Secrets
+docker-compose.yml

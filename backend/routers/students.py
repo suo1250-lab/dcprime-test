@@ -1,7 +1,7 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from database import get_db
@@ -121,13 +121,15 @@ def get_student_profile(student_id: int, db: Session = Depends(get_db)):
     if not student:
         raise HTTPException(404, "학생을 찾을 수 없습니다")
 
-    test_results = db.query(models.TestResult).filter(
+    test_results = db.query(models.TestResult).options(
+        joinedload(models.TestResult.test)
+    ).filter(
         models.TestResult.student_id == student_id
     ).order_by(models.TestResult.created_at.desc()).all()
 
     test_result_list = []
     for tr in test_results:
-        test = db.get(models.Test, tr.test_id)
+        test = tr.test
         test_result_list.append({
             "test_id":    tr.test_id,
             "test_title": test.title if test else "",
@@ -159,13 +161,15 @@ def get_student_profile(student_id: int, db: Session = Depends(get_db)):
                 "outcome": h.outcome, "source_file": h.source_file, "grade": h.grade,
             })
 
-    tutoring = db.query(models.WordTutoringSession).filter(
+    tutoring = db.query(models.WordTutoringSession).options(
+        joinedload(models.WordTutoringSession.word_test)
+    ).filter(
         models.WordTutoringSession.student_id == student_id
     ).order_by(models.WordTutoringSession.session_date.desc()).limit(10).all()
 
     tutoring_list = []
     for t in tutoring:
-        wt = db.get(models.WordTest, t.word_test_id) if t.word_test_id else None
+        wt = t.word_test if t.word_test_id else None
         tutoring_list.append({
             "id":               t.id,
             "session_date":     str(t.session_date),

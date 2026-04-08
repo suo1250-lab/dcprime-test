@@ -144,7 +144,13 @@ export default function WordTestsPage() {
 
   const deleteTest = async (id: number) => {
     if (!confirm("시험을 삭제하시겠습니까? 모든 제출 결과도 삭제됩니다.")) return;
-    await apiFetch(`/word-tests/${id}`, { method: "DELETE" });
+    try {
+      await apiFetch(`/word-tests/${id}`, { method: "DELETE" });
+    } catch (e: unknown) {
+      if (!(e instanceof Error && e.message === "Not found")) {
+        alert(e instanceof Error ? e.message : "삭제 실패");
+      }
+    }
     if (expandedId === id) { setExpandedId(null); setDetail(null); setEditItems([]); }
     load();
   };

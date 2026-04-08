@@ -24,6 +24,12 @@ class WordTestIn(BaseModel):
     test_date: date
     items: List[ItemIn] = []
 
+class WordTestUpdate(BaseModel):
+    title: str
+    grade: str
+    direction: str
+    test_date: date
+
 class WordTestOut(BaseModel):
     id: int
     title: str
@@ -80,6 +86,20 @@ def get_word_test(test_id: int, db: Session = Depends(get_db)):
     if not test:
         raise HTTPException(404, "Not found")
     return test
+
+@router.put("/{test_id}", response_model=WordTestOut)
+def update_word_test(test_id: int, body: WordTestUpdate, db: Session = Depends(get_db)):
+    test = db.query(WordTest).filter(WordTest.id == test_id).first()
+    if not test:
+        raise HTTPException(404, "Not found")
+    test.title = body.title
+    test.grade = body.grade
+    test.direction = body.direction
+    test.test_date = body.test_date
+    db.commit()
+    db.refresh(test)
+    cnt = db.query(func.count(WordTestItem.id)).filter(WordTestItem.word_test_id == test_id).scalar()
+    return WordTestOut(id=test.id, title=test.title, grade=test.grade, direction=test.direction, test_date=test.test_date, item_count=cnt)
 
 @router.delete("/{test_id}", status_code=204)
 def delete_word_test(test_id: int, db: Session = Depends(get_db)):

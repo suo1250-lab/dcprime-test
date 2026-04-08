@@ -31,6 +31,9 @@ export default function WordTestsPage() {
   const [dayEnd, setDayEnd] = useState<string>("");
   const [loadingBook, setLoadingBook] = useState(false);
   const [previewItems, setPreviewItems] = useState<ItemRow[]>([]);
+  const [editingMeta, setEditingMeta] = useState<number | null>(null);
+  const [metaForm, setMetaForm] = useState({ title: "", grade: "중1", direction: "EN_KR", test_date: "" });
+  const [savingMeta, setSavingMeta] = useState(false);
 
   const load = () => {
     apiFetch<WordTest[]>("/word-tests").then(setTests).catch(() => {});
@@ -142,6 +145,27 @@ export default function WordTestsPage() {
     }
   };
 
+  const startEditMeta = (t: WordTest) => {
+    setEditingMeta(t.id);
+    setMetaForm({ title: t.title, grade: t.grade, direction: t.direction, test_date: String(t.test_date) });
+  };
+
+  const saveMeta = async (id: number) => {
+    setSavingMeta(true);
+    try {
+      await apiFetch(`/word-tests/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(metaForm),
+      });
+      setEditingMeta(null);
+      load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "저장 실패");
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
   const deleteTest = async (id: number) => {
     if (!confirm("시험을 삭제하시겠습니까? 모든 제출 결과도 삭제됩니다.")) return;
     try {
@@ -241,6 +265,28 @@ export default function WordTestsPage() {
         {tests.map((t) => (
           <div key={t.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
             {/* 헤더 */}
+            {editingMeta === t.id ? (
+              <div className="flex flex-wrap items-center gap-2 px-5 py-4">
+                <input value={metaForm.title} onChange={(e) => setMetaForm({ ...metaForm, title: e.target.value })}
+                  className={inputCls + " w-52"} placeholder="시험명" />
+                <select value={metaForm.grade} onChange={(e) => setMetaForm({ ...metaForm, grade: e.target.value })} className={selectCls}>
+                  {GRADES.map((g) => <option key={g}>{g}</option>)}
+                </select>
+                <select value={metaForm.direction} onChange={(e) => setMetaForm({ ...metaForm, direction: e.target.value })} className={selectCls}>
+                  <option value="EN_KR">영어→한국어</option>
+                  <option value="KR_EN">한국어→영어</option>
+                  <option value="MIXED">혼합</option>
+                </select>
+                <input type="date" value={metaForm.test_date} onChange={(e) => setMetaForm({ ...metaForm, test_date: e.target.value })}
+                  className={inputCls} />
+                <button onClick={() => saveMeta(t.id)} disabled={savingMeta}
+                  className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                  {savingMeta ? "저장 중..." : "저장"}
+                </button>
+                <button onClick={() => setEditingMeta(null)}
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:underline">취소</button>
+              </div>
+            ) : (
             <div className="flex items-center gap-4 px-5 py-4">
               <button onClick={() => toggleExpand(t.id)} className="flex-1 text-left flex items-center gap-3 hover:text-indigo-700 dark:hover:text-indigo-400 transition-colors">
                 <span className="text-base font-semibold text-gray-800 dark:text-gray-100">{t.title}</span>
@@ -252,6 +298,10 @@ export default function WordTestsPage() {
                 <span className="text-xs text-gray-400 dark:text-gray-500">{t.item_count}문항</span>
                 <span className="text-xs text-indigo-400 dark:text-indigo-500 ml-auto">{expandedId === t.id ? "▲ 접기" : "▼ 펼치기"}</span>
               </button>
+              <button onClick={() => startEditMeta(t)}
+                className="text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                수정
+              </button>
               <button
                 onClick={() => setShowQR(showQR === t.id ? null : t.id)}
                 className="text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -260,6 +310,7 @@ export default function WordTestsPage() {
               </button>
               <button onClick={() => deleteTest(t.id)} className="text-xs text-red-500 dark:text-red-400 hover:underline font-medium">삭제</button>
             </div>
+            )}
 
             {/* QR코드 팝업 */}
             {showQR === t.id && (

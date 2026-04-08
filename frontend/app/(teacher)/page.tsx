@@ -22,6 +22,7 @@ const mathCards = [
   { href: "/math-tests", label: "시험 관리", desc: "수학 시험 생성 및 정답 등록", icon: "📐" },
   { href: "/math-submissions", label: "OMR 채점", desc: "OMR 답안지 업로드 및 결과 조회", icon: "📋" },
   { href: "/math-tutoring", label: "튜터링 기록", desc: "수학 튜터링 결과 기록 및 조회", icon: "🔢" },
+  { href: "/math-history", label: "성적 추이", desc: "학생별 시험 성적 추이 및 오답 분석", icon: "📈" },
 ];
 
 interface NasFolder { count: number; files: string[] }

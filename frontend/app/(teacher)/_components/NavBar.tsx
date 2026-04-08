@@ -33,6 +33,7 @@ const menus = [
       { href: "/math-tests", label: "시험 관리" },
       { href: "/math-submissions", label: "OMR 채점" },
       { href: "/math-tutoring", label: "튜터링 기록" },
+      { href: "/math-history", label: "성적 추이" },
     ],
   },
 ];

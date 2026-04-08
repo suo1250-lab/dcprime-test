@@ -36,6 +36,10 @@ GRADED_WORD:       Path = Path(os.environ.get("GRADED_WORD",       str(_BASE / "
 GRADED_ENTRANCE:   Path = Path(os.environ.get("GRADED_ENTRANCE",   str(_BASE / "입학테스트" / "채점완료")))
 ANSWER_ENTRANCE:   Path = Path(os.environ.get("ANSWER_ENTRANCE",   str(_BASE / "입학테스트" / "입학테스트답지모음")))
 ANSWER_WORD:       Path = Path(os.environ.get("ANSWER_WORD",       str(_BASE / "영어단어튜터링" / "영어단어테스트답지모음")))
+
+UNGRADED_MATH:     Path = Path(os.environ.get("UNGRADED_MATH",     str(_BASE / "수학" / "미채점")))
+GRADED_MATH:       Path = Path(os.environ.get("GRADED_MATH",       str(_BASE / "수학" / "채점완료")))
+ANSWER_MATH:       Path = Path(os.environ.get("ANSWER_MATH",       str(_BASE / "수학" / "수학답지모음(주테omr전용)")))
 GRADED:            Path = GRADED_WORD  # 하위 호환성
 ERROR_DIR:         Path = Path(os.environ.get("ERROR_DIR",         str(_NAS_ROOT / "미채점오류")))
 UNMATCHED_DIR:     Path = Path(os.environ.get("UNMATCHED_DIR",     str(_NAS_ROOT / "미매칭")))

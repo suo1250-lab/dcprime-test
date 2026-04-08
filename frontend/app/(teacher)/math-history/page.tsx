@@ -174,7 +174,7 @@ export default function MathHistoryPage() {
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9ca3af" }} />
                 <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: "#9ca3af" }} />
                 <Tooltip
-                  formatter={(value: number, name: string) => [`${value}%`, name === "pct" ? "내 점수" : "반 평균"]}
+                  formatter={(value, name) => [`${value}%`, name === "pct" ? "내 점수" : "반 평균"]}
                   labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
@@ -195,7 +195,7 @@ export default function MathHistoryPage() {
                   <XAxis dataKey="q" tick={{ fontSize: 10, fill: "#9ca3af" }} />
                   <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: "#9ca3af" }} />
                   <Tooltip
-                    formatter={(value: number, _: string, props) => [
+                    formatter={(value, _, props) => [
                       `${value}% (${props.payload.wrong}/${props.payload.total}회)`, "오답률"
                     ]}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}

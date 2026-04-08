@@ -22,6 +22,11 @@ const wordNav = [
   { href: "/word-answer-key", label: "답지 등록" },
 ];
 
+const mathNav = [
+  { href: "/math-tests", label: "시험 관리" },
+  { href: "/math-submissions", label: "OMR 채점" },
+];
+
 export default function NavBar() {
   const [open, setOpen] = useState(false);
 
@@ -44,6 +49,15 @@ export default function NavBar() {
         <div className="flex items-stretch border-l border-indigo-500/50">
           <span className="text-indigo-300 text-xs flex items-center px-3 border-r border-indigo-500/50 shrink-0">영어단어</span>
           {wordNav.map((n) => (
+            <Link key={n.href} href={n.href}
+              className="flex items-center px-3 hover:bg-indigo-600 dark:hover:bg-indigo-800 text-sm font-medium transition-colors whitespace-nowrap">
+              {n.label}
+            </Link>
+          ))}
+        </div>
+        <div className="flex items-stretch border-l border-indigo-500/50">
+          <span className="text-indigo-300 text-xs flex items-center px-3 border-r border-indigo-500/50 shrink-0">수학</span>
+          {mathNav.map((n) => (
             <Link key={n.href} href={n.href}
               className="flex items-center px-3 hover:bg-indigo-600 dark:hover:bg-indigo-800 text-sm font-medium transition-colors whitespace-nowrap">
               {n.label}
@@ -93,6 +107,17 @@ export default function NavBar() {
             <p className="text-indigo-300 text-xs font-semibold uppercase tracking-wider mb-2">영어단어 튜터링</p>
             <div className="grid grid-cols-3 gap-1">
               {wordNav.map((n) => (
+                <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
+                  className="text-sm py-2 px-3 rounded-lg hover:bg-indigo-600 transition-colors text-center">
+                  {n.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+          <div className="px-4 pt-2 pb-1 border-t border-indigo-500/30 mt-1">
+            <p className="text-indigo-300 text-xs font-semibold uppercase tracking-wider mb-2">수학</p>
+            <div className="grid grid-cols-3 gap-1">
+              {mathNav.map((n) => (
                 <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
                   className="text-sm py-2 px-3 rounded-lg hover:bg-indigo-600 transition-colors text-center">
                   {n.label}

@@ -18,6 +18,12 @@ const wordCards = [
   { href: "/word-tutoring", label: "튜터링 기록", desc: "1~3차 시험 결과 기록 및 조회", icon: "🔄" },
 ];
 
+const mathCards = [
+  { href: "/math-tests", label: "시험 관리", desc: "수학 시험 생성 및 정답 등록", icon: "📐" },
+  { href: "/math-submissions", label: "OMR 채점", desc: "OMR 답안지 업로드 및 결과 조회", icon: "📋" },
+  { href: "/math-tutoring", label: "튜터링 기록", desc: "수학 튜터링 결과 기록 및 조회", icon: "🔢" },
+];
+
 interface NasFolder { count: number; files: string[] }
 interface NasStatus {
   ungraded_entrance: NasFolder;
@@ -76,6 +82,24 @@ export default function Home() {
               className="group flex flex-col bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-emerald-400 dark:hover:border-emerald-500 transition-all duration-200">
               <span className="text-2xl mb-2">{c.icon}</span>
               <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 mb-1">{c.label}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{c.desc}</div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-3 mb-4">
+          <span className="bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">수학</span>
+          <h2 className="text-base font-bold text-gray-700 dark:text-gray-200">수학 튜터링</h2>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {mathCards.map((c) => (
+            <Link key={c.href} href={c.href}
+              className="group flex flex-col bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-orange-400 dark:hover:border-orange-500 transition-all duration-200">
+              <span className="text-2xl mb-2">{c.icon}</span>
+              <div className="text-sm font-semibold text-orange-700 dark:text-orange-400 mb-1">{c.label}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{c.desc}</div>
             </Link>
           ))}

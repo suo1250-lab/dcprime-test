@@ -25,6 +25,7 @@ const wordNav = [
 const mathNav = [
   { href: "/math-tests", label: "시험 관리" },
   { href: "/math-submissions", label: "OMR 채점" },
+  { href: "/math-tutoring", label: "튜터링 기록" },
 ];
 
 export default function NavBar() {
@@ -33,7 +34,7 @@ export default function NavBar() {
   return (
     <nav className="bg-indigo-700 dark:bg-indigo-900 text-white shadow-lg">
       {/* 데스크탑 */}
-      <div className="hidden lg:flex items-stretch h-12">
+      <div className="hidden lg:flex items-stretch h-12 overflow-x-auto">
         <Link href="/" className="font-bold text-base flex items-center px-5 border-r border-indigo-500/50 hover:bg-indigo-600 transition-colors shrink-0">
           DCPRIME
         </Link>

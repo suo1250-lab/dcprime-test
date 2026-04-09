@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+import shutil
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from database import get_db
+from database import get_db, SessionLocal
 from models import MathTest, MathSubmission, MathSubmissionItem, Student
+from config import UPLOAD_DIR
 
 router = APIRouter(prefix="/math-submissions", tags=["math-submissions"])
 
@@ -76,7 +79,7 @@ def _calc_class_stats(db: Session, math_test_id: int, student_id: int):
     return round(avg, 1), rank, len(scores)
 
 
-@router.get("", response_model=List[MathSubmissionOut])
+@router.get("")
 def list_submissions(
     student_id: Optional[int] = None,
     test_id: Optional[int] = None,
@@ -95,8 +98,110 @@ def list_submissions(
         class_avg, class_rank, class_total = None, None, None
         if detail and s.student_id and s.math_test_id and s.status == "graded":
             class_avg, class_rank, class_total = _calc_class_stats(db, s.math_test_id, s.student_id)
-        result.append(MathSubmissionOut(**_build_out(s, class_avg, class_rank, class_total)))
+        row = _build_out(s, class_avg, class_rank, class_total)
+        if detail:
+            row["items"] = [
+                {
+                    "question_no": i.question_no,
+                    "student_answer": i.student_answer,
+                    "correct_answer": i.correct_answer,
+                    "is_correct": i.is_correct,
+                }
+                for i in s.items
+            ]
+        result.append(row)
     return result
+
+
+def _bg_grade_math(submission_id: int, image_path: str, answers: list):
+    """백그라운드에서 OMR AI 채점"""
+    from ai_utils import ai_text_call
+    import json as _json
+
+    db = SessionLocal()
+    try:
+        sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()
+        if not sub:
+            return
+
+        prompt = f"""이것은 수학 시험 OMR 답안지입니다. 각 문항의 마킹된 번호(1~5)를 읽어주세요.
+정답지: {answers}  (인덱스 0 = 1번 문항 정답, ...)
+각 문항에서 학생이 마킹한 번호를 읽고 다음 JSON으로만 응답하세요:
+[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}},...]
+마킹이 불분명하면 student_answer를 null로."""
+
+        text = ai_text_call(prompt, max_tokens=1000, fast=True)
+        if text.startswith("```"):
+            text = text.split("```")[1].lstrip("json").strip()
+        results = _json.loads(text.strip())
+
+        score = 0
+        for r in results:
+            qno = r["question_no"]
+            stu = r.get("student_answer")
+            cor = answers[qno - 1] if 0 < qno <= len(answers) else 0
+            is_correct = (stu is not None and stu == cor)
+            if is_correct:
+                score += 1
+            db.add(MathSubmissionItem(
+                submission_id=submission_id,
+                question_no=qno,
+                student_answer=stu,
+                correct_answer=cor,
+                is_correct=is_correct,
+            ))
+        sub.score = score
+        sub.total = len(answers)
+        sub.status = "graded"
+        db.commit()
+        print(f"[MathSubmission] 채점완료: sub_id={submission_id} {score}/{len(answers)}")
+    except Exception as e:
+        db.rollback()
+        sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()
+        if sub:
+            sub.status = "error"
+            db.commit()
+        print(f"[MathSubmission] 채점실패: {e}")
+    finally:
+        db.close()
+
+
+@router.post("", status_code=201)
+async def upload_omr(
+    background_tasks: BackgroundTasks,
+    student_name: str = Form(...),
+    test_id: int = Form(...),
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    test = db.query(MathTest).filter(MathTest.id == test_id).first()
+    if not test:
+        raise HTTPException(404, "시험을 찾을 수 없습니다")
+    if not test.answers or not any(a > 0 for a in test.answers):
+        raise HTTPException(400, "정답이 등록되지 않은 시험입니다")
+
+    student = db.query(Student).filter(Student.name == student_name).first()
+    ext = Path(image.filename).suffix if image.filename else ".jpg"
+
+    sub = MathSubmission(
+        math_test_id=test.id,
+        student_id=student.id if student else None,
+        student_name=student_name,
+        status="pending",
+        total=test.num_questions,
+    )
+    db.add(sub)
+    db.flush()
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    img_path = UPLOAD_DIR / f"math_sub_{sub.id}{ext}"
+    with open(img_path, "wb") as f:
+        shutil.copyfileobj(image.file, f)
+    sub.image_path = str(img_path)
+    db.commit()
+
+    background_tasks.add_task(_bg_grade_math, sub.id, str(img_path), list(test.answers))
+    return {"id": sub.id, "status": "pending"}
 
 
 @router.get("/{sub_id}", response_model=MathSubmissionDetailOut)

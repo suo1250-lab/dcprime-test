@@ -18,12 +18,12 @@ interface MathSubmissionDetail {
   score: number;
   total: number;
   status: string;
-  class_avg: number | null;   // 반 평균 점수 (raw)
+  class_avg: number | null;   // 반 평균 % (0~100)
   class_rank: number | null;  // 반 석차
   class_total: number | null; // 반 응시 인원
-  items: {
+  items?: {
     question_no: number;
-    student_answer: number;
+    student_answer: number | null;
     correct_answer: number;
     is_correct: boolean;
   }[];
@@ -54,7 +54,7 @@ export default function MathHistoryPage() {
   // 성적 추이 데이터
   const trendData = graded.map((s) => {
     const pct = Math.round((s.score / s.total) * 100);
-    const classAvgPct = s.class_avg != null ? Math.round((s.class_avg / s.total) * 100) : null;
+    const classAvgPct = s.class_avg != null ? Math.round(s.class_avg) : null;
     return {
       name: s.test_title.length > 8 ? s.test_title.slice(0, 8) + "…" : s.test_title,
       fullName: s.test_title,
@@ -246,11 +246,11 @@ export default function MathHistoryPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center text-sm text-indigo-500 dark:text-indigo-400">
-                          {classAvgPct != null ? (
+                          {s.class_avg != null ? (
                             <span>
-                              {classAvgPct}%
-                              <span className={`text-xs ml-1 ${pct >= classAvgPct ? "text-green-500" : "text-red-400"}`}>
-                                ({pct >= classAvgPct ? "▲" : "▼"}{Math.abs(pct - classAvgPct)}%p)
+                              {Math.round(s.class_avg)}%
+                              <span className={`text-xs ml-1 ${pct >= Math.round(s.class_avg) ? "text-green-500" : "text-red-400"}`}>
+                                ({pct >= Math.round(s.class_avg) ? "▲" : "▼"}{Math.abs(pct - Math.round(s.class_avg))}%p)
                               </span>
                             </span>
                           ) : "-"}

@@ -188,6 +188,45 @@ class TeacherWordConfig(Base):
     word_test = relationship("WordTest")
 
 
+class MathTest(Base):
+    __tablename__ = "math_tests"
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    grade = Column(String(20), nullable=False)
+    test_date = Column(Date, nullable=False)
+    num_questions = Column(Integer, nullable=False, default=0)
+    answers = Column(JSON, nullable=False, default=[])
+    source_file = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    submissions = relationship("MathSubmission", back_populates="math_test", cascade="all, delete-orphan")
+
+
+class MathSubmission(Base):
+    __tablename__ = "math_submissions"
+    id = Column(Integer, primary_key=True)
+    math_test_id = Column(Integer, ForeignKey("math_tests.id", ondelete="CASCADE"), nullable=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"), nullable=True)
+    student_name = Column(String(50), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    score = Column(Integer, nullable=True)
+    total = Column(Integer, nullable=True)
+    image_path = Column(String(500), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+    math_test = relationship("MathTest", back_populates="submissions")
+    items = relationship("MathSubmissionItem", back_populates="submission", cascade="all, delete-orphan", order_by="MathSubmissionItem.question_no")
+
+
+class MathSubmissionItem(Base):
+    __tablename__ = "math_submission_items"
+    id = Column(Integer, primary_key=True)
+    submission_id = Column(Integer, ForeignKey("math_submissions.id", ondelete="CASCADE"), nullable=False)
+    question_no = Column(Integer, nullable=False)
+    student_answer = Column(Integer, nullable=True)
+    correct_answer = Column(Integer, nullable=False)
+    is_correct = Column(Boolean, nullable=False)
+    submission = relationship("MathSubmission", back_populates="items")
+
+
 class WordTutoringSession(Base):
     __tablename__ = "word_tutoring_sessions"
     id = Column(Integer, primary_key=True)

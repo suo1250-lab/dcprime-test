@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import students, tests, results, classes, analytics
 from routers import word_tests, word_submissions, historical, word_tutoring, nas, word_config
+from routers import math_tests, math_submissions
 from watcher import start_watcher, stop_watcher
 
 
@@ -38,6 +39,8 @@ app.include_router(historical.router, prefix="/api")
 app.include_router(word_tutoring.router, prefix="/api")
 app.include_router(nas.router, prefix="/api")
 app.include_router(word_config.router, prefix="/api")
+app.include_router(math_tests.router, prefix="/api")
+app.include_router(math_submissions.router, prefix="/api")
 
 
 @app.get("/")

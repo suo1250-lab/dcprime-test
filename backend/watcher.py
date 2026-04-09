@@ -20,10 +20,10 @@ from threading import Thread
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from config import (
-    UNGRADED_WORD, UNGRADED_ENTRANCE,
-    GRADED_WORD, GRADED_ENTRANCE,
+    UNGRADED_WORD, UNGRADED_ENTRANCE, UNGRADED_MATH,
+    GRADED_WORD, GRADED_ENTRANCE, GRADED_MATH,
     ERROR_DIR, UNMATCHED_DIR, LOCAL_BACKUP,
-    ANSWER_ENTRANCE, ANSWER_WORD,
+    ANSWER_ENTRANCE, ANSWER_WORD, ANSWER_MATH,
 )
 from ai_utils import ai_call as _ai_call_util, ai_text_call
 from database import SessionLocal
@@ -35,8 +35,10 @@ HWP_EXT    = {".hwp", ".hwpx"}
 
 
 def _ensure_dirs():
-    for d in [UNGRADED_WORD, UNGRADED_ENTRANCE, GRADED_WORD, GRADED_ENTRANCE,
-              ERROR_DIR, UNMATCHED_DIR, LOCAL_BACKUP, ANSWER_ENTRANCE, ANSWER_WORD]:
+    for d in [UNGRADED_WORD, UNGRADED_ENTRANCE, UNGRADED_MATH,
+              GRADED_WORD, GRADED_ENTRANCE, GRADED_MATH,
+              ERROR_DIR, UNMATCHED_DIR, LOCAL_BACKUP,
+              ANSWER_ENTRANCE, ANSWER_WORD, ANSWER_MATH]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -949,6 +951,184 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
         db.close()
 
 
+# ── 수학 OMR 채점 ──────────────────────────────────────────────
+def _grade_omr(file_path: str, answers: list) -> list:
+    """OMR 이미지/PDF에서 마킹 번호 읽기 → 정답과 비교 채점. Haiku 사용."""
+    prompt = """이것은 OMR 답안지입니다. 각 문항에서 학생이 마킹한 번호(1~5)를 읽으세요.
+마킹이 없거나 불분명하면 0으로.
+JSON 배열로만 응답 (다른 텍스트 없이):
+[{"question_no": 1, "student_answer": 3}, {"question_no": 2, "student_answer": 1}, ...]"""
+    text = _ai_call(file_path, prompt, max_tokens=1000, fast=True)
+    raw = _parse_json(text)
+
+    results = []
+    for r in raw:
+        q_no = r.get("question_no")
+        s_ans = r.get("student_answer", 0) or 0
+        if q_no is None or q_no < 1 or q_no > len(answers):
+            continue
+        c_ans = answers[q_no - 1]
+        results.append({
+            "question_no": q_no,
+            "student_answer": s_ans,
+            "correct_answer": c_ans,
+            "is_correct": (s_ans == c_ans and c_ans > 0),
+        })
+    return results
+
+
+def _match_math_test(db, title: str):
+    t = db.query(models.MathTest).filter(
+        models.MathTest.title.ilike(f"%{title}%")
+    ).first()
+    if t:
+        return t
+    for word in title.split():
+        if len(word) < 2:
+            continue
+        t = db.query(models.MathTest).filter(
+            models.MathTest.title.ilike(f"%{word}%")
+        ).first()
+        if t:
+            return t
+    return None
+
+
+def _process_math_omr_core(file_path: Path, db) -> tuple:
+    """
+    수학 OMR: 학생 이름 + 시험 매칭 → OMR 읽기 → 채점 → DB flush
+    Returns: (new_name, submission)
+    """
+    # 학생 이름 + 시험명 추출
+    prompt = """이 OMR 답안지에서 다음 정보를 JSON으로 추출하세요. 다른 텍스트 없이 JSON만:
+{"student_name": "학생 이름", "class_name": "반 이름(없으면 빈 문자열)", "test_title": "시험 제목(없으면 빈 문자열)"}"""
+    info = _parse_json(_ai_call(str(file_path), prompt, max_tokens=300, fast=True))
+    student_name = info.get("student_name", "").strip()
+    class_name   = info.get("class_name", "").strip()
+    test_title   = info.get("test_title", "").strip()
+
+    if not student_name:
+        raise ValueError("학생 이름을 읽지 못했습니다")
+
+    student = _match_student(db, student_name, class_name)
+    if not student:
+        raise ValueError(f"미매칭:{student_name}")
+
+    # 시험 매칭 (이름으로 먼저, 없으면 가장 최근 시험)
+    math_test = None
+    if test_title:
+        math_test = _match_math_test(db, test_title)
+    if not math_test:
+        math_test = db.query(models.MathTest).order_by(models.MathTest.created_at.desc()).first()
+    if not math_test:
+        raise ValueError("등록된 수학 시험이 없습니다")
+    if not math_test.answers or not any(a > 0 for a in math_test.answers):
+        raise ValueError(f"시험 정답이 등록되지 않았습니다: {math_test.title}")
+
+    results = _grade_omr(str(file_path), math_test.answers)
+    if not results:
+        raise ValueError("OMR 채점 결과가 비어있습니다")
+
+    score = sum(1 for r in results if r["is_correct"])
+    new_name = _make_graded_filename(student, db, suffix=file_path.suffix)
+
+    submission = models.MathSubmission(
+        math_test_id=math_test.id,
+        student_id=student.id,
+        student_name=student.name,
+        status="graded",
+        score=score,
+        total=len(results),
+        image_path=None,
+    )
+    db.add(submission)
+    db.flush()
+
+    for r in results:
+        db.add(models.MathSubmissionItem(
+            submission_id=submission.id,
+            question_no=r["question_no"],
+            student_answer=r["student_answer"],
+            correct_answer=r["correct_answer"],
+            is_correct=r["is_correct"],
+        ))
+    db.flush()
+    print(f"[Watcher] ✓ 수학 OMR: {student.name} | {math_test.title} | {score}/{len(results)}")
+    return new_name, submission
+
+
+def process_math_omr_file(filepath: Path):
+    """수학 OMR 단일 파일 처리"""
+    db = SessionLocal()
+    try:
+        print(f"[Watcher] 수학 OMR 처리 시작: {filepath.name}")
+        new_name, submission = _process_math_omr_core(filepath, db)
+        dest = _unique_dest(GRADED_MATH / new_name)
+        _save_local_backup(filepath.read_bytes(), dest.name)
+        shutil.move(str(filepath), str(dest))
+        submission.image_path = str(dest)
+        db.commit()
+    except ValueError as e:
+        if str(e).startswith("미매칭:"):
+            _save_unmatched(filepath.read_bytes(), str(e).split(":", 1)[1].strip())
+            filepath.unlink(missing_ok=True)
+            db.rollback()
+        else:
+            print(f"[Watcher] ✗ {filepath.name}: {e}")
+            db.rollback()
+            _move_to_error(filepath)
+    except Exception as e:
+        print(f"[Watcher] ✗ {filepath.name}: {e}")
+        db.rollback()
+        _move_to_error(filepath)
+    finally:
+        db.close()
+
+
+def _process_math_answer_key(filepath: Path):
+    """수학 답지(PDF/이미지) → math_tests DB 자동 등록"""
+    db = SessionLocal()
+    try:
+        print(f"[Watcher] 수학 답지 처리: {filepath.name}")
+        prompt = f"""이것은 수학 시험 OMR 정답지입니다.
+각 문항의 정답 번호(1~5)를 읽고 다음 JSON으로 응답하세요. 다른 텍스트 없이 JSON만:
+{{"title": "시험 제목", "grade": "학년(중1/중2/중3/고1/고2/고3)", "test_date": "YYYY-MM-DD", "answers": [3, 1, 4, 1, 5]}}
+answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면 오늘 날짜({date.today()})."""
+        response = _ai_call(str(filepath), prompt, max_tokens=2000)
+        data = _parse_json(response)
+
+        from datetime import datetime as _dt
+        try:
+            test_date = _dt.strptime(data["test_date"], "%Y-%m-%d").date()
+        except Exception:
+            test_date = date.today()
+
+        answers = [int(a) for a in data.get("answers", [])]
+        title = data.get("title") or filepath.stem
+
+        test = models.MathTest(
+            title=title,
+            grade=data.get("grade", "미상"),
+            test_date=test_date,
+            num_questions=len(answers),
+            answers=answers,
+            source_file=filepath.name,
+        )
+        db.add(test)
+        db.commit()
+
+        done_dir = ANSWER_MATH / "등록완료"
+        done_dir.mkdir(exist_ok=True)
+        shutil.move(str(filepath), str(_unique_dest(done_dir / filepath.name)))
+        print(f"[Watcher] ✓ 수학 답지 등록: {title} ({len(answers)}문항)")
+    except Exception as e:
+        db.rollback()
+        print(f"[Watcher] ✗ 수학 답지 등록 실패: {e}")
+        _move_to_error(filepath)
+    finally:
+        db.close()
+
+
 # ── Watchdog 핸들러 ────────────────────────────────────────────
 class _NASHandler(FileSystemEventHandler):
     def on_created(self, event):
@@ -977,6 +1157,12 @@ class _NASHandler(FileSystemEventHandler):
         elif filepath.parent == ANSWER_WORD:
             if ext in PDF_EXT or ext in HWP_EXT:
                 Thread(target=_process_word_answer_key, args=(filepath,), daemon=True).start()
+        elif filepath.parent == UNGRADED_MATH:
+            if ext in PDF_EXT or ext in IMAGE_EXTS:
+                Thread(target=process_math_omr_file, args=(filepath,), daemon=True).start()
+        elif filepath.parent == ANSWER_MATH:
+            if ext in PDF_EXT or ext in IMAGE_EXTS:
+                Thread(target=_process_math_answer_key, args=(filepath,), daemon=True).start()
 
 
 # ── 외부 진입점 ────────────────────────────────────────────────
@@ -1003,6 +1189,20 @@ def _scan_existing():
         elif ext in PDF_EXT:
             Thread(target=process_pdf_file, args=(filepath, "entrance"), daemon=True).start()
 
+    for filepath in UNGRADED_MATH.iterdir():
+        if not filepath.is_file():
+            continue
+        ext = filepath.suffix.lower()
+        if ext in IMAGE_EXTS or ext in PDF_EXT:
+            Thread(target=process_math_omr_file, args=(filepath,), daemon=True).start()
+
+    for filepath in ANSWER_MATH.iterdir():
+        if not filepath.is_file():
+            continue
+        ext = filepath.suffix.lower()
+        if ext in IMAGE_EXTS or ext in PDF_EXT:
+            Thread(target=_process_math_answer_key, args=(filepath,), daemon=True).start()
+
 
 def start_watcher():
     global _observer
@@ -1020,11 +1220,15 @@ def start_watcher():
     _observer.schedule(handler, str(UNGRADED_ENTRANCE), recursive=False)
     _observer.schedule(handler, str(ANSWER_ENTRANCE),   recursive=False)
     _observer.schedule(handler, str(ANSWER_WORD),       recursive=False)
+    _observer.schedule(handler, str(UNGRADED_MATH),     recursive=False)
+    _observer.schedule(handler, str(ANSWER_MATH),       recursive=False)
     _observer.start()
     print(f"[Watcher] 감시 시작 → {UNGRADED_WORD}")
     print(f"[Watcher] 감시 시작 → {UNGRADED_ENTRANCE}")
     print(f"[Watcher] 감시 시작 → {ANSWER_ENTRANCE}")
     print(f"[Watcher] 감시 시작 → {ANSWER_WORD}")
+    print(f"[Watcher] 감시 시작 → {UNGRADED_MATH}")
+    print(f"[Watcher] 감시 시작 → {ANSWER_MATH}")
 
 
 def stop_watcher():

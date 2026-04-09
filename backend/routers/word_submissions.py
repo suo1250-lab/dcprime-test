@@ -472,6 +472,114 @@ def reopen_submission(sub_id: int, db: Session = Depends(get_db)):
     return {"status": s.status}
 
 
+@router.get("/{sub_id}/marked-pdf")
+def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
+    """원본 이미지 + 빨간 펜 채점 결과 PDF 생성 및 반환"""
+    import fitz
+
+    s = db.query(WordSubmission).filter(WordSubmission.id == sub_id).first()
+    if not s:
+        raise HTTPException(404, "Not found")
+
+    doc  = fitz.open()
+    font = _get_font(doc)
+
+    # ── 1페이지: 원본 이미지 ──────────────────────────────────
+    page1 = doc.new_page(width=595, height=842)
+    if s.image_path:
+        img_path = Path(s.image_path)
+        if img_path.exists():
+            ext = img_path.suffix.lower()
+            if ext == ".pdf":
+                # PDF면 첫 페이지를 렌더링해서 삽입
+                src = fitz.open(str(img_path))
+                if src.page_count > 0:
+                    pix = src[0].get_pixmap(dpi=150)
+                    page1.insert_image(fitz.Rect(0, 0, 595, 842), pixmap=pix)
+                src.close()
+            else:
+                page1.insert_image(fitz.Rect(0, 0, 595, 842), filename=str(img_path))
+
+    # ── 2페이지: 채점 결과 (빨간 펜 스타일) ───────────────────
+    page2    = doc.new_page(width=595, height=842)
+    font2    = _get_font(doc)
+    test_ttl = s.word_test.title if s.word_test else ""
+    pct      = round(s.score / s.total * 100) if (s.total and s.score is not None) else 0
+    wrong_nos = [i.item_no for i in s.items if i.is_correct is False]
+
+    # 헤더
+    y = 45
+    _insert_text_kr(page2, (50, y),      s.student_name,              font2, size=16, color=(0.05, 0.05, 0.05))
+    _insert_text_kr(page2, (50, y + 24), f"{test_ttl}  |  {s.grade}", font2, size=11, color=(0.4, 0.4, 0.4))
+    score_clr = (0.8, 0, 0) if pct < 70 else (0, 0.5, 0)
+    _insert_text_kr(page2, (400, y),
+        f"{s.score} / {s.total}  ({pct}%)", font2, size=14, color=score_clr)
+
+    if wrong_nos:
+        wrong_str = "틀린 문항: " + ", ".join(str(n) for n in sorted(wrong_nos))
+        _insert_text_kr(page2, (50, y + 46), wrong_str, font2, size=10, color=(0.8, 0, 0))
+
+    y += 75
+    page2.draw_line((50, y), (545, y), color=(0.8, 0.1, 0.1), width=1.2)
+    y += 14
+
+    # 2열 레이아웃
+    col_w   = 240
+    col_gap = 15
+    col_x   = [50, 50 + col_w + col_gap]
+    row_h   = 36
+    col_idx = 0
+
+    items_sorted = sorted(s.items, key=lambda x: x.item_no)
+
+    for item in items_sorted:
+        cx = col_x[col_idx]
+
+        if y > 800:
+            page2    = doc.new_page(width=595, height=842)
+            font2    = _get_font(doc)
+            y        = 50
+            col_idx  = 0
+            cx       = col_x[0]
+
+        if item.is_correct is True:
+            mark, mark_clr, text_clr = "O", (0, 0.55, 0.1), (0.15, 0.15, 0.15)
+        elif item.is_correct is False:
+            mark, mark_clr, text_clr = "X", (0.85, 0.05, 0.05), (0.85, 0.05, 0.05)
+        else:
+            mark, mark_clr, text_clr = "△", (0.75, 0.45, 0), (0.4, 0.4, 0.4)
+
+        # 마크 배경 원
+        page2.draw_circle(fitz.Point(cx + 10, y - 3), 9, color=mark_clr, fill=mark_clr if item.is_correct is False else None)
+        _insert_text_kr(page2, (cx + 6, y),   mark,                          font2, size=11, color=(1,1,1) if item.is_correct is False else mark_clr)
+        _insert_text_kr(page2, (cx + 24, y),  f"{item.item_no}. {item.question or ''}",   font2, size=10, color=text_clr)
+
+        if item.is_correct is False:
+            stu = item.student_answer or "(무응답)"
+            cor = item.correct_answer or ""
+            _insert_text_kr(page2, (cx + 24, y + 13),
+                f"  학생: {stu}  →  정답: {cor}", font2, size=9, color=(0.7, 0.0, 0.0))
+        elif item.is_correct is True:
+            _insert_text_kr(page2, (cx + 24, y + 13),
+                f"  {item.student_answer or ''}", font2, size=9, color=(0.3, 0.3, 0.3))
+
+        col_idx += 1
+        if col_idx == 2:
+            col_idx = 0
+            y += row_h
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    doc.close()
+
+    fname = f"{s.student_name}_{test_ttl}_채점결과.pdf"
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
+
+
 @router.get("/{sub_id}/image")
 def get_image(sub_id: int, db: Session = Depends(get_db)):
     s = db.query(WordSubmission).filter(WordSubmission.id == sub_id).first()

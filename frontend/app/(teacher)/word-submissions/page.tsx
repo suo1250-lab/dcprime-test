@@ -167,11 +167,12 @@ export default function WordSubmissionsPage() {
                           검토
                         </button>
                       )}
-                      <a href={`${BASE}/api/word-submissions/${s.id}/image`} target="_blank" rel="noreferrer"
+                      <a href={`${BASE}/api/word-submissions/${s.id}/marked-pdf`}
+                        download
                         className="text-blue-500 dark:text-blue-400 hover:underline text-xs font-medium">
                         다운로드
                       </a>
-                      <button onClick={() => { window.open(`${BASE}/api/word-submissions/${s.id}/image`, "_blank"); }}
+                      <button onClick={() => { window.open(`${BASE}/api/word-submissions/${s.id}/marked-pdf`, "_blank"); }}
                         className="text-gray-500 dark:text-gray-400 hover:underline text-xs font-medium">
                         인쇄
                       </button>

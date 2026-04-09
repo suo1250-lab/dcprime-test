@@ -36,23 +36,18 @@ def _unique_dest(dest: Path) -> Path:
         i += 1
 
 
-def _get_font(doc):
-    """
-    한글 지원 폰트 반환.
-    KOREAN_FONT_PATH(.env)에 지정된 파일 우선 사용.
-    없으면 fitz 내장 폰트(helv) 사용 → 한글 깨질 수 있음.
-    """
-    import fitz
+def _get_font(doc) -> str:
+    """한글 폰트 파일 경로 반환. 없으면 빈 문자열 (helv 폴백)."""
     font_path = Path(KOREAN_FONT_PATH)
-    if font_path.exists():
-        return fitz.Font(fontfile=str(font_path))
-    # 내장 폰트 폴백 (ASCII만 정상, 한글 깨질 수 있음)
-    return fitz.Font("helv")
+    return str(font_path) if font_path.exists() else ""
 
 
-def _insert_text_kr(page, pos, text: str, font, size: int = 11, color=(0, 0, 0)):
-    """한글 폰트로 텍스트 삽입"""
-    page.insert_text(pos, text, fontsize=size, font=font, color=color)
+def _insert_text_kr(page, pos, text: str, font: str, size: int = 11, color=(0, 0, 0)):
+    """한글 폰트로 텍스트 삽입 (font = 폰트 파일 경로 문자열)"""
+    if font:
+        page.insert_text(pos, text, fontsize=size, fontname="korean", fontfile=font, color=color)
+    else:
+        page.insert_text(pos, text, fontsize=size, fontname="helv", color=color)
 
 
 # === [A안] 원본 이미지만 PDF로 변환 ===

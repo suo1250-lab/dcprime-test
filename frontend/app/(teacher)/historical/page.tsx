@@ -111,14 +111,47 @@ export default function HistoricalPage() {
     window.open(`${BASE}/api/historical/export/excel${q}`, "_blank");
   };
 
+  const [ingestStatus, setIngestStatus] = useState<{
+    running: boolean; total: number; done: number; skipped: number; errors: number; current: string; log: string[];
+  } | null>(null);
+  const [ingestOpen, setIngestOpen] = useState(false);
+
+  const startIngest = async () => {
+    await fetch(`${BASE}/api/historical/ingest`, { method: "POST" });
+    setIngestOpen(true);
+    pollIngest();
+  };
+
+  const pollIngest = () => {
+    const iv = setInterval(async () => {
+      const r = await fetch(`${BASE}/api/historical/ingest/status`);
+      const data = await r.json();
+      setIngestStatus(data);
+      if (!data.running) { clearInterval(iv); load(); }
+    }, 1500);
+  };
+
+  useEffect(() => {
+    fetch(`${BASE}/api/historical/ingest/status`)
+      .then(r => r.json()).then(data => {
+        if (data.running) { setIngestStatus(data); setIngestOpen(true); pollIngest(); }
+      });
+  }, []);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">역대 입학테스트 이력</h1>
-        <button onClick={exportExcel}
-          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
-          엑셀 내보내기
-        </button>
+        <div className="flex gap-2">
+          <button onClick={startIngest}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+            📥 스캔본 일괄 적재
+          </button>
+          <button onClick={exportExcel}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+            엑셀 내보내기
+          </button>
+        </div>
       </div>
 
       {stats && (
@@ -264,6 +297,37 @@ export default function HistoricalPage() {
         </div>
       </div>
       <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">총 {students.length}건 표시 중 (전체 {stats?.total ?? 0}건)</p>
+
+      {ingestOpen && ingestStatus && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold dark:text-white">📥 스캔본 적재 중</h2>
+              {!ingestStatus.running && (
+                <button onClick={() => setIngestOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              )}
+            </div>
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300 mb-1">
+                <span>{ingestStatus.running ? `처리 중: ${ingestStatus.current}` : "완료"}</span>
+                <span>{ingestStatus.done + ingestStatus.skipped + ingestStatus.errors} / {ingestStatus.total}</span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div className="bg-indigo-500 h-2 rounded-full transition-all"
+                  style={{ width: ingestStatus.total ? `${((ingestStatus.done + ingestStatus.skipped + ingestStatus.errors) / ingestStatus.total) * 100}%` : "0%" }} />
+              </div>
+            </div>
+            <div className="flex gap-4 text-sm mb-4">
+              <span className="text-green-600 dark:text-green-400">✓ {ingestStatus.done}개</span>
+              <span className="text-gray-500">⏭ {ingestStatus.skipped}개 스킵</span>
+              <span className="text-red-500">❌ {ingestStatus.errors}개 오류</span>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 h-40 overflow-y-auto text-xs font-mono text-gray-700 dark:text-gray-300 space-y-0.5">
+              {ingestStatus.log.slice(-50).map((l, i) => <div key={i}>{l}</div>)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

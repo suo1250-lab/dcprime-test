@@ -48,6 +48,12 @@ UNMATCHED_DIR:     Path = Path(os.environ.get("UNMATCHED_DIR",     str(_NAS_ROOT
 UPLOAD_DIR:   Path = Path(os.environ.get("UPLOAD_DIR",   "/app/uploads"))
 LOCAL_BACKUP: Path = Path(os.environ.get("LOCAL_BACKUP", "/app/uploads/graded"))
 
+# ── 역대 입학테스트 스캔본 경로 ────────────────────────────────
+HISTORICAL_SCAN_DIR: Path = Path(os.environ.get(
+    "HISTORICAL_SCAN_DIR",
+    str(_NAS_ROOT / "3. 선생님" / "3. 선생님" / "원장" / "입학테스트 스캔본")
+))
+
 # ── 한글 폰트 경로 (PDF 생성 시 사용) ─────────────────────────
 # Docker: RUN apt-get install -y fonts-nanum 후 아래 경로 자동 사용
 # 커스텀 폰트 경로 지정 시 KOREAN_FONT_PATH 환경변수 설정

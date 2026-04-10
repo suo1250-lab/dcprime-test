@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from pydantic import BaseModel
 from typing import Optional, List
-from database import get_db
+from database import get_db, SessionLocal
 from database import Base
 import models
+import json
+import re
 
 router = APIRouter(prefix="/historical", tags=["historical"])
 
@@ -181,6 +183,133 @@ def export_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=historical.xlsx"}
     )
+
+
+# ── 인제스트 상태 (메모리) ──────────────────────────────────────
+_ingest_status = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "skipped": 0,
+    "errors": 0,
+    "current": "",
+    "log": [],
+}
+
+EXTRACT_PROMPT = """이 이미지는 학원 입학테스트 답안지입니다. 아래 정보를 JSON으로만 반환하세요.
+
+추출 항목:
+- name: 학생 이름
+- grade: 학년 (고1/고2/고3/중1/중2/중3/초5/초6, 없으면 null)
+- school: 학교명 (없으면 null)
+- subject: 과목 (수학/영어/국어/과학, 없으면 null)
+- score: 획득 점수 (숫자, 없으면 null)
+- total: 만점 (숫자, 없으면 null)
+- question_results: 문항별 정오답 {"1": true, "2": false, ...} (O=true, X=false, 표시없으면 생략)
+
+JSON만 반환, 다른 텍스트 없이."""
+
+
+def _parse_json(raw: str) -> dict:
+    raw = raw.strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw)
+    if m:
+        raw = m.group(1).strip()
+    return json.loads(raw)
+
+
+def _run_ingest():
+    from pathlib import Path
+    from ai_utils import ai_call
+    from config import HISTORICAL_SCAN_DIR
+
+    global _ingest_status
+    _ingest_status.update({"running": True, "total": 0, "done": 0, "skipped": 0, "errors": 0, "log": []})
+
+    folders = {
+        "배정확정": "배정확정",
+        "등록불가 및 포기": "등록불가",
+    }
+
+    db = SessionLocal()
+    try:
+        done_files = {r[0] for r in db.query(models.HistoricalStudent.source_file).filter(
+            models.HistoricalStudent.source_file.isnot(None)
+        ).all()}
+
+        all_pdfs = []
+        for folder_name, outcome in folders.items():
+            folder = HISTORICAL_SCAN_DIR / folder_name
+            if not folder.exists():
+                _ingest_status["log"].append(f"⚠️ 폴더 없음: {folder}")
+                continue
+            for pdf in sorted(folder.glob("*.[pP][dD][fF]")):
+                all_pdfs.append((pdf, outcome))
+
+        _ingest_status["total"] = len(all_pdfs)
+
+        for pdf_path, outcome in all_pdfs:
+            fname = pdf_path.name
+            _ingest_status["current"] = fname
+
+            if fname in done_files:
+                _ingest_status["skipped"] += 1
+                continue
+
+            try:
+                raw = ai_call(str(pdf_path), EXTRACT_PROMPT, max_tokens=1024)
+                data = _parse_json(raw)
+
+                name = data.get("name") or fname
+                grade = data.get("grade")
+                school = data.get("school")
+                subject = data.get("subject")
+                score = data.get("score")
+                total = data.get("total")
+                score_pct = round(score / total * 100) if score and total else None
+                q_results = data.get("question_results") or {}
+
+                hs = models.HistoricalStudent(
+                    name=name, grade=grade, school=school, subject=subject,
+                    score=score, total=total, score_pct=score_pct,
+                    outcome=outcome, source_file=fname
+                )
+                db.add(hs)
+                db.flush()
+
+                for qno, is_correct in q_results.items():
+                    if isinstance(is_correct, bool):
+                        db.add(models.HistoricalQuestionResult(
+                            historical_student_id=hs.id,
+                            question_no=int(qno),
+                            is_correct=is_correct
+                        ))
+                db.commit()
+                _ingest_status["done"] += 1
+                _ingest_status["log"].append(f"✓ {name} / {grade} / {subject} / {score}/{total}")
+
+            except Exception as e:
+                db.rollback()
+                _ingest_status["errors"] += 1
+                _ingest_status["log"].append(f"❌ {fname}: {e}")
+
+    finally:
+        db.close()
+        _ingest_status["running"] = False
+        _ingest_status["current"] = ""
+
+
+@router.post("/ingest", status_code=202)
+def start_ingest(background_tasks: BackgroundTasks):
+    if _ingest_status["running"]:
+        raise HTTPException(409, "이미 실행 중입니다")
+    background_tasks.add_task(_run_ingest)
+    return {"message": "인제스트 시작됨"}
+
+
+@router.get("/ingest/status")
+def ingest_status():
+    return _ingest_status
 
 
 @router.get("/stats")

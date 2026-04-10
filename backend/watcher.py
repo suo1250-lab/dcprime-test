@@ -843,7 +843,7 @@ def _split_text_by_day(text: str) -> list[tuple[int, str]]:
 
 
 def _extract_items_from_text_chunk(chunk: str, day_no: int, item_offset: int) -> list[dict]:
-    """텍스트 청크에서 단어 항목 추출 (AI 호출)."""
+    """텍스트 청크에서 단어 항목 추출 (AI 호출). 429 rate limit 시 최대 3회 재시도."""
     prompt = f"""다음은 영어 단어장 DAY {day_no} 텍스트입니다.
 단어 번호, 한국어 뜻(question), 영어 단어(answer)를 추출하세요.
 JSON 배열로만 응답 (다른 텍스트 없이):
@@ -851,12 +851,20 @@ JSON 배열로만 응답 (다른 텍스트 없이):
 
 텍스트:
 {chunk[:3000]}"""
-    try:
-        response = ai_text_call(prompt, max_tokens=4000, fast=True)
-        return _parse_json(response)
-    except Exception as e:
-        print(f"[Watcher] DAY {day_no} 추출 실패: {e}")
-        return []
+    for attempt in range(3):
+        try:
+            response = ai_text_call(prompt, max_tokens=4000, fast=True)
+            return _parse_json(response)
+        except Exception as e:
+            if "429" in str(e) or "rate_limit" in str(e):
+                wait = (attempt + 1) * 30  # 30초, 60초, 90초
+                print(f"[Watcher] DAY {day_no} rate limit, {wait}초 후 재시도 ({attempt+1}/3)")
+                time.sleep(wait)
+            else:
+                print(f"[Watcher] DAY {day_no} 추출 실패: {e}")
+                return []
+    print(f"[Watcher] DAY {day_no} 최대 재시도 초과, 건너뜀")
+    return []
 
 
 def _process_word_answer_key(filepath: Path):

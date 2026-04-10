@@ -16,7 +16,10 @@ import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import date
-from threading import Thread
+from threading import Thread, Semaphore
+
+# 동시 AI 처리 최대 3개 제한 (rate limit + DB 연결 풀 보호)
+_PROCESS_SEMAPHORE = Semaphore(3)
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from config import (
@@ -1190,6 +1193,13 @@ answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면
         _move_to_error(filepath)
 
 
+# ── 세마포어 래퍼 ──────────────────────────────────────────────
+def _run_with_sem(fn, *args):
+    """세마포어 획득 후 fn 실행 → 동시 처리 최대 3개 제한"""
+    with _PROCESS_SEMAPHORE:
+        fn(*args)
+
+
 # ── Watchdog 핸들러 ────────────────────────────────────────────
 class _NASHandler(FileSystemEventHandler):
     def on_created(self, event):
@@ -1204,26 +1214,26 @@ class _NASHandler(FileSystemEventHandler):
 
         if filepath.parent == UNGRADED_WORD:
             if ext in PDF_EXT:
-                Thread(target=process_pdf_file, args=(filepath, "word"), daemon=True).start()
+                Thread(target=_run_with_sem, args=(process_pdf_file, filepath, "word"), daemon=True).start()
             elif ext in IMAGE_EXTS:
-                Thread(target=process_word_file, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(process_word_file, filepath), daemon=True).start()
         elif filepath.parent == UNGRADED_ENTRANCE:
             if ext in PDF_EXT:
-                Thread(target=process_pdf_file, args=(filepath, "entrance"), daemon=True).start()
+                Thread(target=_run_with_sem, args=(process_pdf_file, filepath, "entrance"), daemon=True).start()
             elif ext in IMAGE_EXTS:
-                Thread(target=process_entrance_file, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(process_entrance_file, filepath), daemon=True).start()
         elif filepath.parent == ANSWER_ENTRANCE:
             if ext in PDF_EXT or ext in HWP_EXT:
-                Thread(target=_process_entrance_answer_key, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(_process_entrance_answer_key, filepath), daemon=True).start()
         elif filepath.parent == ANSWER_WORD:
             if ext in PDF_EXT or ext in HWP_EXT:
-                Thread(target=_process_word_answer_key, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(_process_word_answer_key, filepath), daemon=True).start()
         elif filepath.parent == UNGRADED_MATH:
             if ext in PDF_EXT or ext in IMAGE_EXTS:
-                Thread(target=process_math_omr_file, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(process_math_omr_file, filepath), daemon=True).start()
         elif filepath.parent == ANSWER_MATH:
             if ext in PDF_EXT or ext in IMAGE_EXTS:
-                Thread(target=_process_math_answer_key, args=(filepath,), daemon=True).start()
+                Thread(target=_run_with_sem, args=(_process_math_answer_key, filepath), daemon=True).start()
 
 
 # ── 외부 진입점 ────────────────────────────────────────────────
@@ -1237,46 +1247,46 @@ def _scan_existing():
             continue
         ext = filepath.suffix.lower()
         if ext in IMAGE_EXTS:
-            Thread(target=process_word_file, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(process_word_file, filepath), daemon=True).start()
         elif ext in PDF_EXT:
-            Thread(target=process_pdf_file, args=(filepath, "word"), daemon=True).start()
+            Thread(target=_run_with_sem, args=(process_pdf_file, filepath, "word"), daemon=True).start()
 
     for filepath in UNGRADED_ENTRANCE.iterdir():
         if not filepath.is_file():
             continue
         ext = filepath.suffix.lower()
         if ext in IMAGE_EXTS:
-            Thread(target=process_entrance_file, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(process_entrance_file, filepath), daemon=True).start()
         elif ext in PDF_EXT:
-            Thread(target=process_pdf_file, args=(filepath, "entrance"), daemon=True).start()
+            Thread(target=_run_with_sem, args=(process_pdf_file, filepath, "entrance"), daemon=True).start()
 
     for filepath in UNGRADED_MATH.iterdir():
         if not filepath.is_file():
             continue
         ext = filepath.suffix.lower()
         if ext in IMAGE_EXTS or ext in PDF_EXT:
-            Thread(target=process_math_omr_file, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(process_math_omr_file, filepath), daemon=True).start()
 
     for filepath in ANSWER_MATH.iterdir():
         if not filepath.is_file():
             continue
         ext = filepath.suffix.lower()
         if ext in IMAGE_EXTS or ext in PDF_EXT:
-            Thread(target=_process_math_answer_key, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(_process_math_answer_key, filepath), daemon=True).start()
 
     for filepath in ANSWER_WORD.iterdir():
         if not filepath.is_file():
             continue
         ext = filepath.suffix.lower()
         if ext in PDF_EXT or ext in HWP_EXT:
-            Thread(target=_process_word_answer_key, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(_process_word_answer_key, filepath), daemon=True).start()
 
     for filepath in ANSWER_ENTRANCE.iterdir():
         if not filepath.is_file():
             continue
         ext = filepath.suffix.lower()
         if ext in PDF_EXT or ext in HWP_EXT:
-            Thread(target=_process_entrance_answer_key, args=(filepath,), daemon=True).start()
+            Thread(target=_run_with_sem, args=(_process_entrance_answer_key, filepath), daemon=True).start()
 
 
 def start_watcher():

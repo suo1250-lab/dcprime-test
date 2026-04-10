@@ -422,6 +422,24 @@ def confirm_submission(sub_id: int, body: ReviewBody, db: Session = Depends(get_
     s.score  = score
     s.status = "confirmed"
     db.commit()
+    db.refresh(s)
+
+    # 확정 시 빨간펜 PDF 생성 → NAS 채점완료 폴더에 저장
+    try:
+        pdf_bytes = _build_marked_pdf(s)
+        student   = db.query(Student).filter(Student.id == s.student_id).first()
+        cls_name  = ""
+        if student:
+            cls = db.query(Class).filter(Class.id == student.class_id).first()
+            cls_name = cls.name if cls else ""
+        nas_path = _save_to_nas(pdf_bytes, s.student_name, cls_name)
+        if nas_path:
+            s.image_path = nas_path
+            db.commit()
+            print(f"[Confirm] 빨간펜 PDF 저장: {nas_path}")
+    except Exception as e:
+        print(f"[Confirm] PDF 저장 실패 (채점은 완료됨): {e}")
+
     return {"status": "confirmed", "score": score, "total": s.total}
 
 
@@ -467,14 +485,9 @@ def reopen_submission(sub_id: int, db: Session = Depends(get_db)):
     return {"status": s.status}
 
 
-@router.get("/{sub_id}/marked-pdf")
-def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
-    """원본 이미지 + 빨간 펜 채점 결과 PDF 생성 및 반환"""
+def _build_marked_pdf(s: WordSubmission) -> bytes:
+    """빨간펜 채점 결과 PDF bytes 생성 (원본 이미지 1p + 채점 결과 2p~)"""
     import fitz
-
-    s = db.query(WordSubmission).filter(WordSubmission.id == sub_id).first()
-    if not s:
-        raise HTTPException(404, "Not found")
 
     doc  = fitz.open()
     font = _get_font(doc)
@@ -486,7 +499,6 @@ def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
         if img_path.exists():
             ext = img_path.suffix.lower()
             if ext == ".pdf":
-                # PDF면 첫 페이지를 렌더링해서 삽입
                 src = fitz.open(str(img_path))
                 if src.page_count > 0:
                     pix = src[0].get_pixmap(dpi=150)
@@ -502,7 +514,6 @@ def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
     pct      = round(s.score / s.total * 100) if (s.total and s.score is not None) else 0
     wrong_nos = [i.item_no for i in s.items if i.is_correct is False]
 
-    # 헤더
     y = 45
     _insert_text_kr(page2, (50, y),      s.student_name,              font2, size=16, color=(0.05, 0.05, 0.05))
     _insert_text_kr(page2, (50, y + 24), f"{test_ttl}  |  {s.grade}", font2, size=11, color=(0.4, 0.4, 0.4))
@@ -518,24 +529,20 @@ def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
     page2.draw_line((50, y), (545, y), color=(0.8, 0.1, 0.1), width=1.2)
     y += 14
 
-    # 2열 레이아웃
     col_w   = 240
     col_gap = 15
     col_x   = [50, 50 + col_w + col_gap]
     row_h   = 36
     col_idx = 0
 
-    items_sorted = sorted(s.items, key=lambda x: x.item_no)
-
-    for item in items_sorted:
+    for item in sorted(s.items, key=lambda x: x.item_no):
         cx = col_x[col_idx]
-
         if y > 800:
-            page2    = doc.new_page(width=595, height=842)
-            font2    = _get_font(doc)
-            y        = 50
-            col_idx  = 0
-            cx       = col_x[0]
+            page2   = doc.new_page(width=595, height=842)
+            font2   = _get_font(doc)
+            y       = 50
+            col_idx = 0
+            cx      = col_x[0]
 
         if item.is_correct is True:
             mark, mark_clr, text_clr = "O", (0, 0.55, 0.1), (0.15, 0.15, 0.15)
@@ -544,19 +551,16 @@ def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
         else:
             mark, mark_clr, text_clr = "△", (0.75, 0.45, 0), (0.4, 0.4, 0.4)
 
-        # 마크 배경 원
         page2.draw_circle(fitz.Point(cx + 10, y - 3), 9, color=mark_clr, fill=mark_clr if item.is_correct is False else None)
-        _insert_text_kr(page2, (cx + 6, y),   mark,                          font2, size=11, color=(1,1,1) if item.is_correct is False else mark_clr)
-        _insert_text_kr(page2, (cx + 24, y),  f"{item.item_no}. {item.question or ''}",   font2, size=10, color=text_clr)
+        _insert_text_kr(page2, (cx + 6, y),  mark,                                       font2, size=11, color=(1,1,1) if item.is_correct is False else mark_clr)
+        _insert_text_kr(page2, (cx + 24, y), f"{item.item_no}. {item.question or ''}",   font2, size=10, color=text_clr)
 
         if item.is_correct is False:
             stu = item.student_answer or "(무응답)"
             cor = item.correct_answer or ""
-            _insert_text_kr(page2, (cx + 24, y + 13),
-                f"  학생: {stu}  →  정답: {cor}", font2, size=9, color=(0.7, 0.0, 0.0))
+            _insert_text_kr(page2, (cx + 24, y + 13), f"  학생: {stu}  →  정답: {cor}", font2, size=9, color=(0.7, 0.0, 0.0))
         elif item.is_correct is True:
-            _insert_text_kr(page2, (cx + 24, y + 13),
-                f"  {item.student_answer or ''}", font2, size=9, color=(0.3, 0.3, 0.3))
+            _insert_text_kr(page2, (cx + 24, y + 13), f"  {item.student_answer or ''}",  font2, size=9, color=(0.3, 0.3, 0.3))
 
         col_idx += 1
         if col_idx == 2:
@@ -566,10 +570,21 @@ def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
     buf = io.BytesIO()
     doc.save(buf)
     doc.close()
+    return buf.getvalue()
 
-    fname = f"{s.student_name}_{test_ttl}_채점결과.pdf"
+
+@router.get("/{sub_id}/marked-pdf")
+def get_marked_pdf(sub_id: int, db: Session = Depends(get_db)):
+    """원본 이미지 + 빨간 펜 채점 결과 PDF 생성 및 반환"""
+    s = db.query(WordSubmission).filter(WordSubmission.id == sub_id).first()
+    if not s:
+        raise HTTPException(404, "Not found")
+
+    pdf_bytes = _build_marked_pdf(s)
+    test_ttl  = s.word_test.title if s.word_test else ""
+    fname     = f"{s.student_name}_{test_ttl}_채점결과.pdf"
     return StreamingResponse(
-        io.BytesIO(buf.getvalue()),
+        io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
     )

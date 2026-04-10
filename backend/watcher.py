@@ -1099,15 +1099,38 @@ def process_math_omr_file(filepath: Path):
 
 
 def _process_math_answer_key(filepath: Path):
-    """수학 답지(PDF/이미지) → math_tests DB 자동 등록"""
+    """수학 답지(PDF/이미지) → math_tests DB 자동 등록
+    - 이미지/스캔PDF (OMR): Haiku 사용
+    - 텍스트 PDF (일반 답지): Sonnet 사용
+    """
     db = SessionLocal()
     try:
         print(f"[Watcher] 수학 답지 처리: {filepath.name}")
-        prompt = f"""이것은 수학 시험 OMR 정답지입니다.
+        ext = filepath.suffix.lower()
+
+        # OMR 여부 판단: 이미지거나 텍스트 추출 안 되는 PDF면 OMR
+        is_omr = ext in IMAGE_EXTS
+        if not is_omr and ext in PDF_EXT:
+            extracted = _extract_pdf_text(filepath)
+            is_omr = len(extracted.strip()) < 200  # 텍스트 없으면 스캔(OMR)
+
+        if is_omr:
+            print(f"[Watcher] 수학 답지 → OMR 형식 (Haiku)")
+            prompt = f"""이것은 수학 시험 OMR 정답지입니다.
 각 문항의 정답 번호(1~5)를 읽고 다음 JSON으로 응답하세요. 다른 텍스트 없이 JSON만:
 {{"title": "시험 제목", "grade": "학년(중1/중2/중3/고1/고2/고3)", "test_date": "YYYY-MM-DD", "answers": [3, 1, 4, 1, 5]}}
 answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면 오늘 날짜({date.today()})."""
-        response = _ai_call(str(filepath), prompt, max_tokens=2000)
+            response = _ai_call(str(filepath), prompt, max_tokens=2000, fast=True)
+        else:
+            print(f"[Watcher] 수학 답지 → 텍스트 형식 (Sonnet)")
+            extracted = _extract_pdf_text(filepath)
+            prompt = f"""다음은 수학 시험 정답지 텍스트입니다:
+{extracted[:3000]}
+
+다음 JSON으로 추출하세요. 다른 텍스트 없이 JSON만:
+{{"title": "시험 제목", "grade": "학년(중1/중2/중3/고1/고2/고3)", "test_date": "YYYY-MM-DD", "answers": [3, 1, 4, 1, 5]}}
+answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면 오늘 날짜({date.today()})."""
+            response = _ai_call(str(filepath), prompt, max_tokens=2000, fast=False)
         data = _parse_json(response)
 
         from datetime import datetime as _dt

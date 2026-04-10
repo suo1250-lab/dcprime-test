@@ -852,7 +852,7 @@ JSON 배열로만 응답 (다른 텍스트 없이):
 텍스트:
 {chunk[:3000]}"""
     try:
-        response = ai_text_call(prompt, max_tokens=4000)
+        response = ai_text_call(prompt, max_tokens=4000, fast=True)
         return _parse_json(response)
     except Exception as e:
         print(f"[Watcher] DAY {day_no} 추출 실패: {e}")
@@ -880,9 +880,9 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
         is_text_pdf = len(full_text.strip()) > 200
 
         if is_text_pdf:
-            meta_response = ai_text_call(f"다음은 영어 단어장 텍스트 앞부분입니다:\n{full_text[:2000]}\n\n{meta_prompt}", max_tokens=500)
+            meta_response = ai_text_call(f"다음은 영어 단어장 텍스트 앞부분입니다:\n{full_text[:2000]}\n\n{meta_prompt}", max_tokens=500, fast=True)
         else:
-            meta_response = _ai_call(str(filepath), meta_prompt, max_tokens=500)
+            meta_response = _ai_call(str(filepath), meta_prompt, max_tokens=500, fast=True)
 
         meta = _parse_json(meta_response)
         print(f"[Watcher] 메타 추출 완료: {meta.get('title')} ({meta.get('grade')})")
@@ -921,7 +921,7 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
             # 스캔 PDF: 단일 AI 호출 (페이지 수 적을 때만 현실적)
             word_prompt = """이 영어 단어장 이미지에서 모든 단어를 추출하세요. JSON 배열로만:
 [{"item_no":1,"question":"한국어뜻","answer":"영어단어"}, ...]"""
-            response = _ai_call(str(filepath), word_prompt, max_tokens=8000)
+            response = _ai_call(str(filepath), word_prompt, max_tokens=8000, fast=True)
             all_items = _parse_json(response)
 
         # item_no 재정렬

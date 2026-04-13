@@ -80,12 +80,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def verify_api_secret(request: Request, call_next):
-    if API_SECRET:
-        # OPTIONS(preflight) 요청은 헤더 검증 제외
-        if request.method != "OPTIONS":
-            secret = request.headers.get("X-API-Secret", "")
-            if secret != API_SECRET:
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "*")

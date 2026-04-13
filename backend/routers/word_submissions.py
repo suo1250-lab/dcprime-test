@@ -1,19 +1,26 @@
 import io
 import json
+import re
 import shutil
 from pathlib import Path
 from datetime import date
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
+from logger import get_logger
+
+log = get_logger("word_submissions")
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from limiter import limiter
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import List, Optional
 from database import get_db, SessionLocal
 from models import WordTest, WordSubmission, WordSubmissionItem, Student, Class
-from config import GRADED, UPLOAD_DIR, KOREAN_FONT_PATH
+from config import GRADED, UPLOAD_DIR, KOREAN_FONT_PATH, MAX_UPLOAD_IMAGE
 from ai_utils import ai_call
 
 router = APIRouter(prefix="/word-submissions", tags=["word-submissions"])
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -137,15 +144,18 @@ def _save_to_nas(pdf_bytes: bytes, student_name: str, class_name: str) -> str:
         dest.write_bytes(pdf_bytes)
         return str(dest)
     except Exception as e:
-        print(f"[Submission] NAS 저장 실패: {e}")
+        log.error(f"[Submission] NAS 저장 실패: {e}")
         return ""
 
 
 # ── AI 채점 (기존 유지) ───────────────────────────────────────
 def grade_with_ai(image_path: str, items: list) -> list:
     try:
+        # M-1: 문제/정답 값의 개행 제거하여 프롬프트 인젝션 방어
+        def _sanitize(s: str) -> str:
+            return str(s).replace("\n", " ").replace("\r", " ")[:100]
         answer_key = "\n".join(
-            [f"{i['item_no']}. 문제: {i['question']} / 정답: {i['answer']}" for i in items]
+            [f"{i['item_no']}. 문제: {_sanitize(i['question'])} / 정답: {_sanitize(i['answer'])}" for i in items]
         )
         prompt = f"""이 이미지는 학생이 손으로 작성한 영어 단어 시험지입니다.
 아래 정답지를 참고하여 각 문항에서 학생이 쓴 답을 판독하고 채점하세요.
@@ -162,13 +172,12 @@ def grade_with_ai(image_path: str, items: list) -> list:
 
         text = ai_call(image_path, prompt, max_tokens=2000)
 
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+        m = _JSON_FENCE_RE.search(text.strip())
+        if m:
+            text = m.group(1).strip()
         return json.loads(text.strip())
     except Exception as e:
-        print(f"AI grading error: {e}")
+        log.error(f"AI grading error: {e}")
         return []
 
 
@@ -220,13 +229,13 @@ def _bg_grade(submission_id: int, image_path: str, items_data: list, student_nam
             if nas_path:
                 submission.image_path = nas_path
         except Exception as e:
-            print(f"[Submission] PDF 저장 실패: {e}")
+            log.error(f"[Submission] PDF 저장 실패: {e}")
 
         db.commit()
-        print(f"[Submission] 백그라운드 채점 완료: sub_id={submission_id} score={score}")
+        log.info(f"[Submission] 백그라운드 채점 완료: sub_id={submission_id} score={score}")
     except Exception as e:
         db.rollback()
-        print(f"[Submission] 백그라운드 채점 실패: {e}")
+        log.error(f"[Submission] 백그라운드 채점 실패: {e}")
     finally:
         db.close()
 
@@ -241,7 +250,9 @@ def _bg_grade(submission_id: int, image_path: str, items_data: list, student_nam
 # 관계없는 수정은 이 엔드포인트를 건드리지 말 것.
 # 대대적인 채점 로직 변경 시에는 양쪽 모두 동기화 필요.
 @router.post("", status_code=201)
+@limiter.limit("120/minute")
 async def submit(
+    request: Request,
     background_tasks: BackgroundTasks,
     word_test_id: int   = Form(...),
     student_name: str   = Form(...),
@@ -252,6 +263,13 @@ async def submit(
     test = db.query(WordTest).filter(WordTest.id == word_test_id).first()
     if not test:
         raise HTTPException(404, "시험을 찾을 수 없습니다")
+
+    if not UPLOAD_DIR.exists():
+        raise HTTPException(503, "업로드 디렉토리에 접근할 수 없습니다 (NAS 마운트 확인 필요)")
+
+    image_bytes = await image.read()
+    if len(image_bytes) > MAX_UPLOAD_IMAGE:
+        raise HTTPException(413, f"이미지 파일이 너무 큽니다 (최대 20MB)")
 
     ext        = Path(image.filename).suffix if image.filename else ".jpg"
     submission = WordSubmission(
@@ -265,8 +283,7 @@ async def submit(
     db.flush()
 
     image_path = UPLOAD_DIR / f"sub_{submission.id}{ext}"
-    with open(image_path, "wb") as f:
-        shutil.copyfileobj(image.file, f)
+    image_path.write_bytes(image_bytes)
     submission.image_path = str(image_path)
     db.commit()
     db.refresh(submission)
@@ -436,9 +453,9 @@ def confirm_submission(sub_id: int, body: ReviewBody, db: Session = Depends(get_
         if nas_path:
             s.image_path = nas_path
             db.commit()
-            print(f"[Confirm] 빨간펜 PDF 저장: {nas_path}")
+            log.info(f"[Confirm] 빨간펜 PDF 저장: {nas_path}")
     except Exception as e:
-        print(f"[Confirm] PDF 저장 실패 (채점은 완료됨): {e}")
+        log.error(f"[Confirm] PDF 저장 실패 (채점은 완료됨): {e}")
 
     return {"status": "confirmed", "score": score, "total": s.total}
 

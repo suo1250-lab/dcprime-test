@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { apiFetch, Test, AnalyticsData, QuestionStat, Student, Class } from "@/lib/api";
+import { apiFetch, apiHeaders, Test, AnalyticsData, QuestionStat, Student, Class } from "@/lib/api";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cell,
 } from "recharts";
@@ -102,7 +102,7 @@ export default function AnalyticsPage() {
     setGenerating(true);
     try {
       const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const res = await fetch(`${BASE}/api/analytics/weakness/${weakStudentId}/${weakTestId}/generate`, { method: "POST" });
+      const res = await fetch(`${BASE}/api/analytics/weakness/${weakStudentId}/${weakTestId}/generate`, { method: "POST", headers: apiHeaders() });
       if (res.ok) {
         const html = await res.text();
         const win = window.open("", "_blank");

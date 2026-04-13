@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { apiHeaders } from "@/lib/api";
 
 const OUTCOMES = ["배정확정", "등록불가", "포기"];
 const GRADES = ["초1","초2","초3","초4","초5","초6","중1","중2","중3","고1","고2","고3"];
@@ -43,8 +44,8 @@ export default function HistoricalPage() {
     if (filterGrade) params.set("grade", filterGrade);
     if (filterSubject) params.set("subject", filterSubject);
     const [sRes, stRes] = await Promise.all([
-      fetch(`${BASE}/api/historical?${params}`),
-      fetch(`${BASE}/api/historical/stats`),
+      fetch(`${BASE}/api/historical?${params}`, { headers: apiHeaders() }),
+      fetch(`${BASE}/api/historical/stats`, { headers: apiHeaders() }),
     ]);
     if (sRes.ok) setStudents(await sRes.json());
     if (stRes.ok) setStats(await stRes.json());
@@ -62,7 +63,7 @@ export default function HistoricalPage() {
     if (!editId) return;
     setSaving(true);
     await fetch(`${BASE}/api/historical/${editId}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name: editForm.name, grade: editForm.grade || null, school: editForm.school || null,
         subject: editForm.subject || null, score: editForm.score != null ? Number(editForm.score) : null,
         total: editForm.total != null ? Number(editForm.total) : null, outcome: editForm.outcome }),
@@ -72,13 +73,13 @@ export default function HistoricalPage() {
 
   const del = async (id: number) => {
     if (!confirm("삭제하시겠습니까?")) return;
-    await fetch(`${BASE}/api/historical/${id}`, { method: "DELETE" });
+    await fetch(`${BASE}/api/historical/${id}`, { method: "DELETE", headers: apiHeaders() });
     load();
   };
 
   const addRecord = async () => {
     await fetch(`${BASE}/api/historical`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name: addForm.name, grade: addForm.grade || null, school: addForm.school || null,
         subject: addForm.subject || null, score: addForm.score ? Number(addForm.score) : null,
         total: addForm.total ? Number(addForm.total) : null, outcome: addForm.outcome, source_file: addForm.source_file || null }),
@@ -117,14 +118,14 @@ export default function HistoricalPage() {
   const [ingestOpen, setIngestOpen] = useState(false);
 
   const startIngest = async () => {
-    await fetch(`${BASE}/api/historical/ingest`, { method: "POST" });
+    await fetch(`${BASE}/api/historical/ingest`, { method: "POST", headers: apiHeaders() });
     setIngestOpen(true);
     pollIngest();
   };
 
   const pollIngest = () => {
     const iv = setInterval(async () => {
-      const r = await fetch(`${BASE}/api/historical/ingest/status`);
+      const r = await fetch(`${BASE}/api/historical/ingest/status`, { headers: apiHeaders() });
       const data = await r.json();
       setIngestStatus(data);
       if (!data.running) { clearInterval(iv); load(); }
@@ -132,7 +133,7 @@ export default function HistoricalPage() {
   };
 
   useEffect(() => {
-    fetch(`${BASE}/api/historical/ingest/status`)
+    fetch(`${BASE}/api/historical/ingest/status`, { headers: apiHeaders() })
       .then(r => r.json()).then(data => {
         if (data.running) { setIngestStatus(data); setIngestOpen(true); pollIngest(); }
       });

@@ -1,5 +1,6 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from config import MAX_UPLOAD_EXCEL
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
@@ -215,15 +216,17 @@ async def import_students_excel(
     """
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "엑셀 파일(.xlsx, .xls)만 업로드 가능합니다")
+    excel_bytes = await file.read()
+    if len(excel_bytes) > MAX_UPLOAD_EXCEL:
+        raise HTTPException(413, "엑셀 파일이 너무 큽니다 (최대 5MB)")
 
     try:
         import openpyxl
     except ImportError:
         raise HTTPException(500, "openpyxl이 설치되어 있지 않습니다")
 
-    content = await file.read()
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
         ws = wb.active
     except Exception as e:
         raise HTTPException(400, f"엑셀 파일을 읽을 수 없습니다: {e}")

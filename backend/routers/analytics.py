@@ -1,9 +1,12 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
 import models
 from ai_utils import ai_text_call
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -215,10 +218,9 @@ JSON으로만 응답:
 
     try:
         text = ai_text_call(prompt, max_tokens=4000)
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+        m = _JSON_FENCE_RE.search(text.strip())
+        if m:
+            text = m.group(1).strip()
         problems = json.loads(text.strip())
     except Exception as e:
         raise HTTPException(500, f"AI 생성 실패: {e}")
@@ -334,10 +336,9 @@ def ai_recommend_assign(test_id: int, db: Session = Depends(get_db)):
 
     try:
         text = ai_text_call(prompt, max_tokens=3000)
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+        m = _JSON_FENCE_RE.search(text.strip())
+        if m:
+            text = m.group(1).strip()
         recommendations = json.loads(text.strip())
     except Exception as e:
         raise HTTPException(500, f"AI 추천 실패: {e}")

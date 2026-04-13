@@ -10,6 +10,14 @@ from dotenv import load_dotenv
 # 프로젝트 루트의 .env 파일 로드 (없어도 에러 없음)
 load_dotenv()
 
+# ── API 인증 ───────────────────────────────────────────────────
+API_SECRET: str = os.environ.get("API_SECRET", "")
+
+# ── 파일 업로드 크기 제한 ───────────────────────────────────────
+MAX_UPLOAD_PDF:   int = 200 * 1024 * 1024   # 200MB (합본 PDF)
+MAX_UPLOAD_IMAGE: int =  20 * 1024 * 1024   # 20MB  (이미지)
+MAX_UPLOAD_EXCEL: int =   5 * 1024 * 1024   # 5MB   (엑셀)
+
 # ── AI API ─────────────────────────────────────────────────────
 GEMINI_API_KEY:    str = os.environ.get("GEMINI_API_KEY", "")
 XAI_API_KEY:       str = os.environ.get("XAI_API_KEY", "")
@@ -17,10 +25,9 @@ XAI_API_KEY:       str = os.environ.get("XAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ── Database ───────────────────────────────────────────────────
-DATABASE_URL: str = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://dcprime:dcprime1234@localhost:5432/dcprime",
-)
+DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL 환경변수가 설정되지 않았습니다")
 
 # ── NAS 루트 ───────────────────────────────────────────────────
 # NAS_ROOT 하나만 설정하면 하위 경로는 자동으로 파생됨.

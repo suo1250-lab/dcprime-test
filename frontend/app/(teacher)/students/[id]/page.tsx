@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { StudentProfile, Class, apiFetch } from "@/lib/api";
+import { StudentProfile, Class, apiFetch, apiHeaders } from "@/lib/api";
 import Link from "next/link";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -25,7 +25,7 @@ export default function StudentProfilePage() {
 
   const loadProfile = () => {
     setLoading(true);
-    fetch(`${BASE}/api/students/${id}/profile`)
+    fetch(`${BASE}/api/students/${id}/profile`, { headers: apiHeaders() })
       .then((r) => r.json())
       .then(setProfile)
       .finally(() => setLoading(false));
@@ -36,7 +36,7 @@ export default function StudentProfilePage() {
   const openLink = async () => {
     setLinkOpen(true);
     if (historicals.length === 0) {
-      const res = await fetch(`${BASE}/api/historical`);
+      const res = await fetch(`${BASE}/api/historical`, { headers: apiHeaders() });
       if (res.ok) setHistoricals(await res.json());
     }
   };

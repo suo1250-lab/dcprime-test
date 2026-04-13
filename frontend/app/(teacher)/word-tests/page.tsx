@@ -1,8 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
-import { apiFetch, WordTest, WordTestDetail } from "@/lib/api";
+import { apiFetch, apiHeaders, WordTest, WordTestDetail } from "@/lib/api";
 
 const GRADES = ["초1","초2","초3","초4","초5","초6","중1","중2","중3","고1","고2","고3"];
+const THRESHOLD_PRESETS = [
+  { label: "표준 (85% / 65%)", correct: 0.85, ambiguous: 0.65 },
+  { label: "엄격 (100% / 100%)", correct: 1.0, ambiguous: 1.0 },
+  { label: "완화 (70% / 50%)", correct: 0.70, ambiguous: 0.50 },
+];
+function thresholdLabel(c: number, a: number): string {
+  const p = THRESHOLD_PRESETS.find((p) => p.correct === c && p.ambiguous === a);
+  return p ? p.label : `사용자 (${Math.round(c*100)}% / ${Math.round(a*100)}%)`;
+}
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const inputCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 const selectCls = inputCls;
@@ -16,7 +25,7 @@ interface ItemRow {
 
 export default function WordTestsPage() {
   const [tests, setTests] = useState<WordTest[]>([]);
-  const [form, setForm] = useState({ title: "", grade: "중1", direction: "EN_KR", test_date: "" });
+  const [form, setForm] = useState({ title: "", grade: "중1", direction: "EN_KR", test_date: "", correct_threshold: 0.85, ambiguous_threshold: 0.65 });
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<WordTestDetail | null>(null);
@@ -32,7 +41,7 @@ export default function WordTestsPage() {
   const [loadingBook, setLoadingBook] = useState(false);
   const [previewItems, setPreviewItems] = useState<ItemRow[]>([]);
   const [editingMeta, setEditingMeta] = useState<number | null>(null);
-  const [metaForm, setMetaForm] = useState({ title: "", grade: "중1", direction: "EN_KR", test_date: "" });
+  const [metaForm, setMetaForm] = useState({ title: "", grade: "중1", direction: "EN_KR", test_date: "", correct_threshold: 0.85, ambiguous_threshold: 0.65 });
   const [savingMeta, setSavingMeta] = useState(false);
 
   const load = () => {
@@ -67,7 +76,7 @@ export default function WordTestsPage() {
         method: "POST",
         body: JSON.stringify({ ...form, items: previewItems.map((i) => ({ item_no: i.item_no, question: i.question, answer: i.answer })) }),
       });
-      setForm({ title: "", grade: "중1", direction: "EN_KR", test_date: "" });
+      setForm({ title: "", grade: "중1", direction: "EN_KR", test_date: "", correct_threshold: 0.85, ambiguous_threshold: 0.65 });
       setBookId(""); setDayStart(""); setDayEnd(""); setPreviewItems([]);
       load();
     } catch (e: unknown) {
@@ -112,6 +121,7 @@ export default function WordTestsPage() {
       const res = await fetch(`${BASE}/api/word-tests/${expandedId}/extract-pdf`, {
         method: "POST",
         body: formData,
+        headers: apiHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "추출 실패");
@@ -147,7 +157,8 @@ export default function WordTestsPage() {
 
   const startEditMeta = (t: WordTest) => {
     setEditingMeta(t.id);
-    setMetaForm({ title: t.title, grade: t.grade, direction: t.direction, test_date: String(t.test_date) });
+    setMetaForm({ title: t.title, grade: t.grade, direction: t.direction, test_date: String(t.test_date),
+                  correct_threshold: t.correct_threshold ?? 0.85, ambiguous_threshold: t.ambiguous_threshold ?? 0.65 });
   };
 
   const saveMeta = async (id: number) => {
@@ -218,6 +229,21 @@ export default function WordTestsPage() {
           <input required type="date" value={form.test_date} onChange={(e) => setForm({ ...form, test_date: e.target.value })}
             className={inputCls} />
         </div>
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">채점 강도</label>
+          <select
+            value={`${form.correct_threshold}/${form.ambiguous_threshold}`}
+            onChange={(e) => {
+              const p = THRESHOLD_PRESETS.find((p) => `${p.correct}/${p.ambiguous}` === e.target.value);
+              if (p) setForm({ ...form, correct_threshold: p.correct, ambiguous_threshold: p.ambiguous });
+            }}
+            className={selectCls}
+          >
+            {THRESHOLD_PRESETS.map((p) => (
+              <option key={p.label} value={`${p.correct}/${p.ambiguous}`}>{p.label}</option>
+            ))}
+          </select>
+        </div>
         <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
           시험 생성
         </button>
@@ -279,6 +305,18 @@ export default function WordTestsPage() {
                 </select>
                 <input type="date" value={metaForm.test_date} onChange={(e) => setMetaForm({ ...metaForm, test_date: e.target.value })}
                   className={inputCls} />
+                <select
+                  value={`${metaForm.correct_threshold}/${metaForm.ambiguous_threshold}`}
+                  onChange={(e) => {
+                    const p = THRESHOLD_PRESETS.find((p) => `${p.correct}/${p.ambiguous}` === e.target.value);
+                    if (p) setMetaForm({ ...metaForm, correct_threshold: p.correct, ambiguous_threshold: p.ambiguous });
+                  }}
+                  className={selectCls}
+                >
+                  {THRESHOLD_PRESETS.map((p) => (
+                    <option key={p.label} value={`${p.correct}/${p.ambiguous}`}>{p.label}</option>
+                  ))}
+                </select>
                 <button onClick={() => saveMeta(t.id)} disabled={savingMeta}
                   className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                   {savingMeta ? "저장 중..." : "저장"}
@@ -296,6 +334,7 @@ export default function WordTestsPage() {
                 </span>
                 <span className="text-xs text-gray-400 dark:text-gray-500">{t.test_date}</span>
                 <span className="text-xs text-gray-400 dark:text-gray-500">{t.item_count}문항</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{thresholdLabel(t.correct_threshold ?? 0.85, t.ambiguous_threshold ?? 0.65)}</span>
                 <span className="text-xs text-indigo-400 dark:text-indigo-500 ml-auto">{expandedId === t.id ? "▲ 접기" : "▼ 펼치기"}</span>
               </button>
               <button onClick={() => startEditMeta(t)}

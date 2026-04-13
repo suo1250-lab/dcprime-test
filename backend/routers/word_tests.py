@@ -1,6 +1,8 @@
 import base64
 import json
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import re
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from limiter import limiter
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
@@ -8,7 +10,13 @@ from typing import List
 from datetime import date
 from database import get_db
 from models import WordTest, WordTestItem
-from config import ANTHROPIC_API_KEY, XAI_API_KEY, GEMINI_API_KEY
+import os
+from config import ANTHROPIC_API_KEY, XAI_API_KEY, GEMINI_API_KEY, MAX_UPLOAD_PDF
+
+_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
+_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
 
 router = APIRouter(prefix="/word-tests", tags=["word-tests"])
 
@@ -22,6 +30,8 @@ class WordTestIn(BaseModel):
     grade: str
     direction: str
     test_date: date
+    correct_threshold: float = 0.85
+    ambiguous_threshold: float = 0.65
     items: List[ItemIn] = []
 
 class WordTestUpdate(BaseModel):
@@ -29,6 +39,8 @@ class WordTestUpdate(BaseModel):
     grade: str
     direction: str
     test_date: date
+    correct_threshold: float = 0.85
+    ambiguous_threshold: float = 0.65
 
 class WordTestOut(BaseModel):
     id: int
@@ -37,6 +49,8 @@ class WordTestOut(BaseModel):
     direction: str
     test_date: date
     item_count: int
+    correct_threshold: float = 0.85
+    ambiguous_threshold: float = 0.65
     class Config:
         from_attributes = True
 
@@ -54,6 +68,8 @@ class WordTestDetailOut(BaseModel):
     grade: str
     direction: str
     test_date: date
+    correct_threshold: float = 0.85
+    ambiguous_threshold: float = 0.65
     items: List[ItemOut]
     class Config:
         from_attributes = True
@@ -67,11 +83,14 @@ def list_word_tests(db: Session = Depends(get_db)):
         .order_by(WordTest.test_date.desc())
         .all()
     )
-    return [WordTestOut(id=t.id, title=t.title, grade=t.grade, direction=t.direction, test_date=t.test_date, item_count=cnt) for t, cnt in rows]
+    return [WordTestOut(id=t.id, title=t.title, grade=t.grade, direction=t.direction, test_date=t.test_date,
+                        correct_threshold=t.correct_threshold or 0.85, ambiguous_threshold=t.ambiguous_threshold or 0.65,
+                        item_count=cnt) for t, cnt in rows]
 
 @router.post("", response_model=WordTestDetailOut)
 def create_word_test(body: WordTestIn, db: Session = Depends(get_db)):
-    test = WordTest(title=body.title, grade=body.grade, direction=body.direction, test_date=body.test_date)
+    test = WordTest(title=body.title, grade=body.grade, direction=body.direction, test_date=body.test_date,
+                    correct_threshold=body.correct_threshold, ambiguous_threshold=body.ambiguous_threshold)
     db.add(test)
     db.flush()
     for item in body.items:
@@ -96,10 +115,13 @@ def update_word_test(test_id: int, body: WordTestUpdate, db: Session = Depends(g
     test.grade = body.grade
     test.direction = body.direction
     test.test_date = body.test_date
+    test.correct_threshold = body.correct_threshold
+    test.ambiguous_threshold = body.ambiguous_threshold
     db.commit()
     db.refresh(test)
     cnt = db.query(func.count(WordTestItem.id)).filter(WordTestItem.word_test_id == test_id).scalar()
-    return WordTestOut(id=test.id, title=test.title, grade=test.grade, direction=test.direction, test_date=test.test_date, item_count=cnt)
+    return WordTestOut(id=test.id, title=test.title, grade=test.grade, direction=test.direction, test_date=test.test_date,
+                       correct_threshold=test.correct_threshold, ambiguous_threshold=test.ambiguous_threshold, item_count=cnt)
 
 @router.delete("/{test_id}", status_code=204)
 def delete_word_test(test_id: int, db: Session = Depends(get_db)):
@@ -184,16 +206,14 @@ def _extract_with_gemini(images: list, direction: str) -> list:
     for data, media_type in images:
         parts.append(types.Part.from_bytes(data=base64.b64decode(data), mime_type=media_type))
     response = client.models.generate_content(
-        model="gemini-2.5-pro-exp-03-25",
+        model=_GEMINI_MODEL,
         contents=parts,
     )
     text = response.text.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else ""
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    return json.loads(text)
 
 
 def _extract_with_grok(images: list, direction: str) -> list:
@@ -209,16 +229,15 @@ def _extract_with_grok(images: list, direction: str) -> list:
         max_tokens=4000,
     )
     text = resp.choices[0].message.content.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else ""
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    return json.loads(text)
 
 
 @router.post("/{test_id}/extract-pdf")
-async def extract_pdf(test_id: int, pdf: UploadFile = File(...), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def extract_pdf(request: Request, test_id: int, pdf: UploadFile = File(...), db: Session = Depends(get_db)):
     test = db.query(WordTest).filter(WordTest.id == test_id).first()
     if not test:
         raise HTTPException(404, "Not found")
@@ -230,6 +249,8 @@ async def extract_pdf(test_id: int, pdf: UploadFile = File(...), db: Session = D
         raise HTTPException(400, "PDF 파일만 업로드 가능합니다")
 
     pdf_bytes = await pdf.read()
+    if len(pdf_bytes) > MAX_UPLOAD_PDF:
+        raise HTTPException(413, "PDF 파일이 너무 큽니다 (최대 200MB)")
     try:
         images = _pdf_to_images_b64(pdf_bytes)
     except Exception as e:
@@ -250,14 +271,12 @@ async def extract_pdf(test_id: int, pdf: UploadFile = File(...), db: Session = D
             for data, media_type in images:
                 content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
             content.append({"type": "text", "text": _extract_prompt(test.direction)})
-            resp = client.messages.create(model="claude-sonnet-4-6", max_tokens=4000, messages=[{"role": "user", "content": content}])
+            resp = client.messages.create(model=_CLAUDE_MODEL, max_tokens=4000, messages=[{"role": "user", "content": content}])
             text = resp.content[0].text.strip()
-            if text.startswith("```"):
-                parts = text.split("```")
-                text = parts[1] if len(parts) > 1 else ""
-                if text.startswith("json"):
-                    text = text[4:]
-            items = json.loads(text.strip())
+            m = _JSON_FENCE_RE.search(text)
+            if m:
+                text = m.group(1).strip()
+            items = json.loads(text)
             ai_used = "claude"
     except json.JSONDecodeError:
         raise HTTPException(500, "AI 응답을 파싱할 수 없습니다. 다시 시도해주세요.")

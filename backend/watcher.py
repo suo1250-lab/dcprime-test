@@ -17,9 +17,17 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import date
 from threading import Thread, Semaphore
+from logger import get_logger
+
+log = get_logger("watcher")
 
 # 동시 AI 처리 최대 3개 제한 (rate limit + DB 연결 풀 보호)
 _PROCESS_SEMAPHORE = Semaphore(3)
+_SEMAPHORE_TIMEOUT = 120  # 초: AI API 응답 대기 최대 시간
+
+# M-3: regex 모듈 레벨에서 한 번만 컴파일
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
+_DAY_SPLIT_RE  = re.compile(r'(DAY\s*\d+)', re.IGNORECASE)
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from config import (
@@ -63,12 +71,13 @@ def _ai_call(file_path: str, prompt: str, max_tokens: int = 2000) -> str:
 
 
 def _parse_json(text: str):
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else ""
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    text = text.strip()
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    if not text:
+        raise ValueError("AI 응답이 비어있습니다")
+    return json.loads(text)
 
 
 # ── PDF 유틸 ───────────────────────────────────────────────────
@@ -152,9 +161,9 @@ def _save_unmatched(pdf_bytes: bytes, student_name: str):
     dest  = _unique_dest(UNMATCHED_DIR / f"미매칭_{today}_{student_name}.pdf")
     try:
         dest.write_bytes(pdf_bytes)
-        print(f"[Watcher] 미매칭 저장: {dest.name}")
+        log.info(f"[Watcher] 미매칭 저장: {dest.name}")
     except Exception as e:
-        print(f"[Watcher] 미매칭 저장 실패: {e}")
+        log.error(f"[Watcher] 미매칭 저장 실패: {e}")
 
 
 # ── 시험지 정보 읽기 ───────────────────────────────────────────
@@ -199,8 +208,10 @@ JSON 배열로만 응답:
 
 def _grade_entrance(file_path: str, answers: dict) -> list:
     """입학테스트 채점"""
+    # M-1: 답안 값을 문자열로 강제 변환하고 개행/제어문자 제거하여 프롬프트 인젝션 방어
     answer_key = "\n".join(
-        [f"{no}번: {ans}" for no, ans in sorted(answers.items(), key=lambda x: int(x[0]))]
+        [f"{no}번: {str(ans).replace(chr(10), ' ').replace(chr(13), ' ')[:20]}"
+         for no, ans in sorted(answers.items(), key=lambda x: int(x[0]))]
     )
     prompt = f"""이것은 학생이 작성한 입학 시험 답안지입니다.
 아래 정답지를 참고하여 각 문항의 학생 답과 정오를 판별하세요.
@@ -254,8 +265,8 @@ def _match_student(db, name: str, class_name: str = ""):
                 candidates.sort(key=lambda x: -x[1])
                 best, best_ratio = candidates[0]
                 # 동점 후보 없거나 2위와 차이가 0.1 이상이면 확정
-                if len(candidates) == 1 or candidates[0][1] - candidates[1][1] >= 0.1:
-                    print(f"[Watcher] 반 기반 유사 매칭: '{name}' → '{best.name}' ({class_name}, {best_ratio:.2f})")
+                if len(candidates) == 1 or (len(candidates) >= 2 and candidates[0][1] - candidates[1][1] >= 0.1):
+                    log.info(f"[Watcher] 반 기반 유사 매칭: '{name}' → '{best.name}' ({class_name}, {best_ratio:.2f})")
                     return best
 
     # 3. 전체 유사 매칭 (반 정보 없는 경우 fallback)
@@ -268,8 +279,8 @@ def _match_student(db, name: str, class_name: str = ""):
     if candidates:
         candidates.sort(key=lambda x: -x[1])
         best, best_ratio = candidates[0]
-        if len(candidates) == 1 or candidates[0][1] - candidates[1][1] >= 0.1:
-            print(f"[Watcher] 유사 매칭: '{name}' → '{best.name}' ({best_ratio:.2f})")
+        if len(candidates) == 1 or (len(candidates) >= 2 and candidates[0][1] - candidates[1][1] >= 0.1):
+            log.info(f"[Watcher] 유사 매칭: '{name}' → '{best.name}' ({best_ratio:.2f})")
             return best
 
     return None
@@ -315,8 +326,9 @@ def _read_student_answers(file_path: str, direction: str) -> list:
     return _parse_json(text)
 
 
-def _grade_with_word_list(student_answers: list, word_items: list, day_start=None, day_end=None) -> list:
-    """DB 단어장과 비교하여 채점. day 범위 필터 적용."""
+def _grade_with_word_list(student_answers: list, word_items: list, day_start=None, day_end=None,
+                          correct_threshold: float = 0.85, ambiguous_threshold: float = 0.65) -> list:
+    """DB 단어장과 비교하여 채점. day 범위 필터 및 채점 강도 임계값 적용."""
     if day_start is not None and day_end is not None:
         filtered = [i for i in word_items if i.day is not None and day_start <= i.day <= day_end]
         if not filtered:
@@ -341,9 +353,9 @@ def _grade_with_word_list(student_answers: list, word_items: list, day_start=Non
         if key_item:
             correct_answer = key_item.answer.strip()
             ratio = SequenceMatcher(None, student_ans.lower().strip(), correct_answer.lower().strip()).ratio()
-            if ratio >= 0.85:
+            if ratio >= correct_threshold:
                 is_correct = True   # O
-            elif ratio >= 0.65:
+            elif ratio >= ambiguous_threshold:
                 is_correct = None   # △ (애매 – 선생님 확인)
             else:
                 is_correct = False  # X
@@ -417,7 +429,7 @@ def _process_word_core(file_path: Path, db, out_suffix: str = ".pdf") -> tuple:
         try:
             shutil.copy2(str(file_path), str(unmatched_dest))
         except Exception as copy_err:
-            print(f"[Watcher] 미매칭 파일 복사 실패: {copy_err}")
+            log.error(f"[Watcher] 미매칭 파일 복사 실패: {copy_err}")
             unmatched_dest = None
 
         submission = models.WordSubmission(
@@ -442,7 +454,7 @@ def _process_word_core(file_path: Path, db, out_suffix: str = ".pdf") -> tuple:
                 is_correct=r.get("is_correct"),
             ))
         db.flush()
-        print(f"[Watcher] ⚠ 미매칭 저장: {student_name} ({score}/{len(results)})")
+        log.warning(f"[Watcher] ⚠ 미매칭 저장: {student_name} ({score}/{len(results)})")
         raise ValueError(f"미매칭저장:{student_name}")
 
     new_name = _make_graded_filename(student, db, suffix=out_suffix)
@@ -453,10 +465,17 @@ def _process_word_core(file_path: Path, db, out_suffix: str = ".pdf") -> tuple:
     if word_test_id:
         # 답지 기반 채점
         word_test_obj = db.get(models.WordTest, word_test_id)
-        student_answers = _read_student_answers(str(file_path), direction)
-        results = _grade_with_word_list(student_answers, word_test_obj.items, day_start, day_end)
-        direction = word_test_obj.direction
-        print(f"[Watcher] 답지 기반 채점: {word_test_obj.title} DAY{day_start}-{day_end}")
+        if word_test_obj is None:
+            log.warning(f"[Watcher] ⚠ word_test_id={word_test_id} 가 삭제된 상태 → 무채점 모드로 fallback")
+            results = _grade_word_no_key(str(file_path), direction)
+        else:
+            student_answers = _read_student_answers(str(file_path), direction)
+            c_thr = word_test_obj.correct_threshold if word_test_obj.correct_threshold is not None else 0.85
+            a_thr = word_test_obj.ambiguous_threshold if word_test_obj.ambiguous_threshold is not None else 0.65
+            results = _grade_with_word_list(student_answers, word_test_obj.items, day_start, day_end,
+                                            correct_threshold=c_thr, ambiguous_threshold=a_thr)
+            direction = word_test_obj.direction
+            log.info(f"[Watcher] 답지 기반 채점: {word_test_obj.title} DAY{day_start}-{day_end} (정답={c_thr}, 애매={a_thr})")
     else:
         results = _grade_word_no_key(str(file_path), direction)
 
@@ -489,7 +508,7 @@ def _process_word_core(file_path: Path, db, out_suffix: str = ".pdf") -> tuple:
         ))
 
     db.flush()
-    print(f"[Watcher] ✓ {new_name} | 단어시험({direction}) | {score}/{len(results)}")
+    log.info(f"[Watcher] ✓ {new_name} | 단어시험({direction}) | {score}/{len(results)}")
     return new_name, submission
 
 
@@ -545,7 +564,7 @@ def _process_entrance_core(file_path: Path, db, out_suffix: str = ".pdf") -> tup
 
     db.flush()
     new_name = _make_graded_filename(student, db, suffix=out_suffix)
-    print(f"[Watcher] ✓ {new_name} | {test.title} | {score}/{len(results)}")
+    log.info(f"[Watcher] ✓ {new_name} | {test.title} | {score}/{len(results)}")
     return new_name, result
 
 
@@ -554,7 +573,7 @@ def process_word_file(filepath: Path):
     """이미지 단어시험 파일 처리. 원본 확장자 유지."""
     db = SessionLocal()
     try:
-        print(f"[Watcher] 단어시험 처리 시작: {filepath.name}")
+        log.info(f"[Watcher] 단어시험 처리 시작: {filepath.name}")
         new_name, submission = _process_word_core(filepath, db, out_suffix=filepath.suffix)
         dest = _unique_dest(GRADED_WORD / new_name)
         # 파일 먼저 이동 후 commit (역순이면 commit 후 이동 실패 시 DB-파일 불일치 발생)
@@ -568,11 +587,11 @@ def process_word_file(filepath: Path):
             db.commit()
             filepath.unlink(missing_ok=True)
         else:
-            print(f"[Watcher] ✗ {filepath.name}: {e}")
+            log.error(f"[Watcher] ✗ {filepath.name}: {e}")
             db.rollback()
             _move_to_error(filepath)
     except Exception as e:
-        print(f"[Watcher] ✗ {filepath.name}: {e}")
+        log.error(f"[Watcher] ✗ {filepath.name}: {e}")
         db.rollback()
         _move_to_error(filepath)
     finally:
@@ -583,14 +602,14 @@ def process_entrance_file(filepath: Path):
     """이미지 입학테스트 파일 처리. 원본 확장자 유지."""
     db = SessionLocal()
     try:
-        print(f"[Watcher] 입학테스트 처리 시작: {filepath.name}")
+        log.info(f"[Watcher] 입학테스트 처리 시작: {filepath.name}")
         new_name, _ = _process_entrance_core(filepath, db, out_suffix=filepath.suffix)
         dest = _unique_dest(GRADED_ENTRANCE / new_name)
         _save_local_backup(filepath.read_bytes(), dest.name)
         shutil.move(str(filepath), str(dest))
         db.commit()
     except Exception as e:
-        print(f"[Watcher] ✗ {filepath.name}: {e}")
+        log.error(f"[Watcher] ✗ {filepath.name}: {e}")
         db.rollback()
         if str(e).startswith("미매칭:"):
             _save_unmatched(filepath.read_bytes(), str(e).split(":", 1)[1].strip())
@@ -616,30 +635,30 @@ def process_pdf_file(filepath: Path, paper_type: str):
     """
     import fitz
 
-    print(f"[Watcher] PDF 처리 시작: {filepath.name} (타입: {paper_type})")
+    log.info(f"[Watcher] PDF 처리 시작: {filepath.name} (타입: {paper_type})")
 
     try:
         doc = fitz.open(str(filepath))
     except Exception as e:
-        print(f"[Watcher] ✗ PDF 열기 실패: {e}")
+        log.error(f"[Watcher] ✗ PDF 열기 실패: {e}")
         _move_to_error(filepath)
         return
 
     total_pages = len(doc)
-    print(f"[Watcher] 총 {total_pages}페이지")
+    log.info(f"[Watcher] 총 {total_pages}페이지")
 
     # Step 1: AI로 학생 목록 + 페이지 범위 스캔
     try:
         students_info = _detect_students_in_pdf(str(filepath), paper_type)
-        print(f"[Watcher] AI 감지: {len(students_info)}명")
+        log.info(f"[Watcher] AI 감지: {len(students_info)}명")
     except Exception as e:
-        print(f"[Watcher] ✗ 학생 감지 실패: {e}")
+        log.error(f"[Watcher] ✗ 학생 감지 실패: {e}")
         doc.close()
         _move_to_error(filepath)
         return
 
     if not students_info:
-        print(f"[Watcher] 학생 감지 결과 없음")
+        log.info(f"[Watcher] 학생 감지 결과 없음")
         doc.close()
         _move_to_error(filepath)
         return
@@ -653,13 +672,13 @@ def process_pdf_file(filepath: Path, paper_type: str):
         pages  = s_info.get("pages", [])
 
         if not pages:
-            print(f"[Watcher] ✗ {s_name}: 페이지 정보 없음")
+            log.error(f"[Watcher] ✗ {s_name}: 페이지 정보 없음")
             fail_count += 1
             continue
 
         valid_pages = [p for p in pages if isinstance(p, int) and 0 <= p < total_pages]
         if not valid_pages:
-            print(f"[Watcher] ✗ {s_name}: 유효하지 않은 페이지 {pages}")
+            log.error(f"[Watcher] ✗ {s_name}: 유효하지 않은 페이지 {pages}")
             fail_count += 1
             continue
 
@@ -667,13 +686,14 @@ def process_pdf_file(filepath: Path, paper_type: str):
         try:
             pdf_bytes = _extract_pdf_pages(doc, valid_pages)
         except Exception as e:
-            print(f"[Watcher] ✗ {s_name}: 페이지 추출 실패: {e}")
+            log.error(f"[Watcher] ✗ {s_name}: 페이지 추출 실패: {e}")
             fail_count += 1
             continue
 
         # 임시 PDF 파일로 저장 (_ai_call이 파일 경로 요구)
-        tmp_path = Path(tempfile.mktemp(suffix=".pdf"))
-        tmp_path.write_bytes(pdf_bytes)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as _tmp:
+            _tmp.write(pdf_bytes)
+            tmp_path = Path(_tmp.name)
 
         db = SessionLocal()
         try:
@@ -694,7 +714,7 @@ def process_pdf_file(filepath: Path, paper_type: str):
                 submission.image_path = str(dest)
             db.commit()
             success_count += 1
-            print(f"[Watcher] ✓ 저장: {dest.name}")
+            log.info(f"[Watcher] ✓ 저장: {dest.name}")
 
         except ValueError as e:
             if str(e).startswith("미매칭저장:"):
@@ -702,7 +722,7 @@ def process_pdf_file(filepath: Path, paper_type: str):
                 db.commit()
                 fail_count += 1
             else:
-                print(f"[Watcher] ✗ {s_name}: {e}")
+                log.error(f"[Watcher] ✗ {s_name}: {e}")
                 db.rollback()
                 err_name = f"오류_{s_name}.pdf"
                 try:
@@ -711,7 +731,7 @@ def process_pdf_file(filepath: Path, paper_type: str):
                     pass
                 fail_count += 1
         except Exception as e:
-            print(f"[Watcher] ✗ {s_name}: {e}")
+            log.error(f"[Watcher] ✗ {s_name}: {e}")
             db.rollback()
             err_name = f"오류_{s_name}.pdf"
             try:
@@ -730,12 +750,12 @@ def process_pdf_file(filepath: Path, paper_type: str):
     if success_count > 0:
         try:
             filepath.unlink()
-            print(f"[Watcher] 원본 삭제: {filepath.name} ({success_count}성공/{fail_count}실패)")
+            log.info(f"[Watcher] 원본 삭제: {filepath.name} ({success_count}성공/{fail_count}실패)")
         except Exception as e:
-            print(f"[Watcher] 원본 삭제 실패: {e}")
+            log.error(f"[Watcher] 원본 삭제 실패: {e}")
     else:
         _move_to_error(filepath)
-        print(f"[Watcher] PDF 전체 실패: {filepath.name}")
+        log.error(f"[Watcher] PDF 전체 실패: {filepath.name}")
 
 
 # ── HWP 텍스트 추출 ───────────────────────────────────────────
@@ -772,7 +792,7 @@ def _process_entrance_answer_key(filepath: Path):
     """입학테스트 답지(HWP/PDF) → DB 자동 등록
     AI 호출 완료 후 DB 연결 → 연결 점유 최소화
     """
-    print(f"[Watcher] 입학테스트 답지 처리: {filepath.name}")
+    log.info(f"[Watcher] 입학테스트 답지 처리: {filepath.name}")
     try:
         ext = filepath.suffix.lower()
 
@@ -819,9 +839,9 @@ test_date가 없으면 오늘 날짜로."""
         done_dir = ANSWER_ENTRANCE / "등록완료"
         done_dir.mkdir(exist_ok=True)
         shutil.move(str(filepath), str(_unique_dest(done_dir / filepath.name)))
-        print(f"[Watcher] ✓ 입학테스트 등록: {data['title']} ({len(answers)}문항)")
+        log.info(f"[Watcher] ✓ 입학테스트 등록: {data['title']} ({len(answers)}문항)")
     except Exception as e:
-        print(f"[Watcher] ✗ 입학테스트 답지 등록 실패: {e}")
+        log.error(f"[Watcher] ✗ 입학테스트 답지 등록 실패: {e}")
         _move_to_error(filepath)
 
 
@@ -838,9 +858,7 @@ def _extract_pdf_text(filepath: Path) -> str:
 
 def _split_text_by_day(text: str) -> list[tuple[int, str]]:
     """텍스트를 DAY 단위로 분할. [(day_no, section_text), ...] 반환."""
-    import re
-    pattern = re.compile(r'(DAY\s*\d+)', re.IGNORECASE)
-    parts = pattern.split(text)
+    parts = _DAY_SPLIT_RE.split(text)
     sections = []
     i = 1
     while i < len(parts):
@@ -869,12 +887,12 @@ JSON 배열로만 응답 (다른 텍스트 없이):
         except Exception as e:
             if "429" in str(e) or "rate_limit" in str(e):
                 wait = (attempt + 1) * 30  # 30초, 60초, 90초
-                print(f"[Watcher] DAY {day_no} rate limit, {wait}초 후 재시도 ({attempt+1}/3)")
+                log.warning(f"[Watcher] DAY {day_no} rate limit, {wait}초 후 재시도 ({attempt+1}/3)")
                 time.sleep(wait)
             else:
-                print(f"[Watcher] DAY {day_no} 추출 실패: {e}")
+                log.error(f"[Watcher] DAY {day_no} 추출 실패: {e}")
                 return []
-    print(f"[Watcher] DAY {day_no} 최대 재시도 초과, 건너뜀")
+    log.error(f"[Watcher] DAY {day_no} 최대 재시도 초과, 건너뜀")
     return []
 
 
@@ -883,7 +901,8 @@ def _process_word_answer_key(filepath: Path):
     AI 호출(느림)을 DB 연결 없이 먼저 완료 → DB는 INSERT 직전에만 열어 연결 점유 최소화
     """
     import traceback
-    print(f"[Watcher] 영어단어 답지 처리: {filepath.name}")
+    db = None  # H-4: finally에서 안전하게 닫기 위해 미리 선언
+    log.info(f"[Watcher] 영어단어 답지 처리: {filepath.name}")
     try:
         ext = filepath.suffix.lower()
 
@@ -906,20 +925,20 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
             meta_response = _ai_call(str(filepath), meta_prompt, max_tokens=500, fast=True)
 
         meta = _parse_json(meta_response)
-        print(f"[Watcher] 메타 추출 완료: {meta.get('title')} ({meta.get('grade')})")
+        log.info(f"[Watcher] 메타 추출 완료: {meta.get('title')} ({meta.get('grade')})")
 
         # ── Step 3: 단어 AI 추출 (DB 연결 없음) ─────────────────────
         all_items = []
         if is_text_pdf:
             day_sections = _split_text_by_day(full_text)
             if day_sections:
-                print(f"[Watcher] {len(day_sections)}개 DAY 섹션 감지, 청크별 추출 시작")
+                log.info(f"[Watcher] {len(day_sections)}개 DAY 섹션 감지, 청크별 추출 시작")
                 for day_no, section_text in day_sections:
                     items = _extract_items_from_text_chunk(section_text, day_no, len(all_items))
                     all_items.extend(items)
-                    print(f"[Watcher] DAY {day_no}: {len(items)}개 추출 (누적 {len(all_items)}개)")
+                    log.info(f"[Watcher] DAY {day_no}: {len(items)}개 추출 (누적 {len(all_items)}개)")
             else:
-                print(f"[Watcher] DAY 구분 없음, 청크별 추출")
+                log.info(f"[Watcher] DAY 구분 없음, 청크별 추출")
                 chunk_size = 2000
                 for i in range(0, len(full_text), chunk_size):
                     chunk = full_text[i:i + chunk_size]
@@ -941,50 +960,42 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
 
         # ── Step 4: DB 연결 → INSERT (AI 호출 끝난 후) ──────────────
         db = SessionLocal()
-        try:
-            word_test = models.WordTest(
-                title=meta["title"],
-                grade=meta["grade"],
-                direction=meta.get("direction", "KR_EN"),
-                test_date=date.today(),
-            )
-            db.add(word_test)
-            db.commit()  # word_test ID 확정 + 연결 즉시 반환
+        word_test = models.WordTest(
+            title=meta["title"],
+            grade=meta["grade"],
+            direction=meta.get("direction", "KR_EN"),
+            test_date=date.today(),
+        )
+        db.add(word_test)
+        db.flush()  # H-6: ID만 확정, commit은 전체 완료 후 한 번만
 
-            db.refresh(word_test)  # ID reload
-
-            BATCH = 50
-            for batch_start in range(0, len(all_items), BATCH):
-                batch = all_items[batch_start:batch_start + BATCH]
-                for item in batch:
-                    q = item.get("question", "")
-                    a = item.get("answer", "")
-                    if is_en_kr:
-                        q, a = a, q
-                    db.add(models.WordTestItem(
-                        word_test_id=word_test.id,
-                        item_no=item["item_no"],
-                        question=q,
-                        answer=a,
-                        day=item.get("day"),
-                    ))
-                db.commit()  # 배치마다 commit → 트랜잭션 짧게 유지
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        for item in all_items:
+            q = item.get("question", "")
+            a = item.get("answer", "")
+            if is_en_kr:
+                q, a = a, q
+            db.add(models.WordTestItem(
+                word_test_id=word_test.id,
+                item_no=item["item_no"],
+                question=q,
+                answer=a,
+                day=item.get("day"),
+            ))
+        db.commit()  # H-6: 전체를 하나의 트랜잭션으로 atomic 처리
 
         done_dir = ANSWER_WORD / "등록완료"
         done_dir.mkdir(exist_ok=True)
         shutil.move(str(filepath), str(_unique_dest(done_dir / filepath.name)))
-        print(f"[Watcher] ✓ 영어단어 등록: {meta['title']} ({len(all_items)}문항)")
+        log.info(f"[Watcher] ✓ 영어단어 등록: {meta['title']} ({len(all_items)}문항)")
     except Exception as e:
-        print(f"[Watcher] ✗ 영어단어 답지 등록 실패: {e}")
-        print(traceback.format_exc())
+        if db is not None:
+            db.rollback()
+        log.error(f"[Watcher] ✗ 영어단어 답지 등록 실패: {e}")
+        log.error(traceback.format_exc())
         _move_to_error(filepath)
     finally:
-        db.close()
+        if db is not None:  # H-4: 단일 지점에서 닫기
+            db.close()
 
 
 # ── 수학 OMR 채점 ──────────────────────────────────────────────
@@ -1089,7 +1100,7 @@ def _process_math_omr_core(file_path: Path, db) -> tuple:
             is_correct=r["is_correct"],
         ))
     db.flush()
-    print(f"[Watcher] ✓ 수학 OMR: {student.name} | {math_test.title} | {score}/{len(results)}")
+    log.info(f"[Watcher] ✓ 수학 OMR: {student.name} | {math_test.title} | {score}/{len(results)}")
     return new_name, submission
 
 
@@ -1097,7 +1108,7 @@ def process_math_omr_file(filepath: Path):
     """수학 OMR 단일 파일 처리"""
     db = SessionLocal()
     try:
-        print(f"[Watcher] 수학 OMR 처리 시작: {filepath.name}")
+        log.info(f"[Watcher] 수학 OMR 처리 시작: {filepath.name}")
         new_name, submission = _process_math_omr_core(filepath, db)
         dest = _unique_dest(GRADED_MATH / new_name)
         _save_local_backup(filepath.read_bytes(), dest.name)
@@ -1110,11 +1121,11 @@ def process_math_omr_file(filepath: Path):
             filepath.unlink(missing_ok=True)
             db.rollback()
         else:
-            print(f"[Watcher] ✗ {filepath.name}: {e}")
+            log.error(f"[Watcher] ✗ {filepath.name}: {e}")
             db.rollback()
             _move_to_error(filepath)
     except Exception as e:
-        print(f"[Watcher] ✗ {filepath.name}: {e}")
+        log.error(f"[Watcher] ✗ {filepath.name}: {e}")
         db.rollback()
         _move_to_error(filepath)
     finally:
@@ -1127,7 +1138,7 @@ def _process_math_answer_key(filepath: Path):
     - 텍스트 PDF (일반 답지): Sonnet 사용
     AI 호출 완료 후 DB 연결 → 연결 점유 최소화
     """
-    print(f"[Watcher] 수학 답지 처리: {filepath.name}")
+    log.info(f"[Watcher] 수학 답지 처리: {filepath.name}")
     try:
         ext = filepath.suffix.lower()
 
@@ -1138,14 +1149,14 @@ def _process_math_answer_key(filepath: Path):
             is_omr = len(extracted.strip()) < 200
 
         if is_omr:
-            print(f"[Watcher] 수학 답지 → OMR 형식 (Haiku)")
+            log.info(f"[Watcher] 수학 답지 → OMR 형식 (Haiku)")
             prompt = f"""이것은 수학 시험 OMR 정답지입니다.
 각 문항의 정답 번호(1~5)를 읽고 다음 JSON으로 응답하세요. 다른 텍스트 없이 JSON만:
 {{"title": "시험 제목", "grade": "학년(중1/중2/중3/고1/고2/고3)", "test_date": "YYYY-MM-DD", "answers": [3, 1, 4, 1, 5]}}
 answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면 오늘 날짜({date.today()})."""
             response = _ai_call(str(filepath), prompt, max_tokens=2000, fast=True)
         else:
-            print(f"[Watcher] 수학 답지 → 텍스트 형식 (Sonnet)")
+            log.info(f"[Watcher] 수학 답지 → 텍스트 형식 (Sonnet)")
             extracted = _extract_pdf_text(filepath)
             prompt = f"""다음은 수학 시험 정답지 텍스트입니다:
 {extracted[:3000]}
@@ -1187,17 +1198,23 @@ answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면
         done_dir = ANSWER_MATH / "등록완료"
         done_dir.mkdir(exist_ok=True)
         shutil.move(str(filepath), str(_unique_dest(done_dir / filepath.name)))
-        print(f"[Watcher] ✓ 수학 답지 등록: {title} ({len(answers)}문항)")
+        log.info(f"[Watcher] ✓ 수학 답지 등록: {title} ({len(answers)}문항)")
     except Exception as e:
-        print(f"[Watcher] ✗ 수학 답지 등록 실패: {e}")
+        log.error(f"[Watcher] ✗ 수학 답지 등록 실패: {e}")
         _move_to_error(filepath)
 
 
 # ── 세마포어 래퍼 ──────────────────────────────────────────────
 def _run_with_sem(fn, *args):
     """세마포어 획득 후 fn 실행 → 동시 처리 최대 3개 제한"""
-    with _PROCESS_SEMAPHORE:
+    acquired = _PROCESS_SEMAPHORE.acquire(timeout=_SEMAPHORE_TIMEOUT)
+    if not acquired:
+        log.error(f"[Watcher] ✗ 세마포어 획득 타임아웃 ({_SEMAPHORE_TIMEOUT}s) → 처리 건너뜀: {args[0] if args else ''}")
+        return
+    try:
         fn(*args)
+    finally:
+        _PROCESS_SEMAPHORE.release()
 
 
 # ── Watchdog 핸들러 ────────────────────────────────────────────
@@ -1293,7 +1310,7 @@ def start_watcher():
     global _observer
     from config import NAS_ROOT as _NAS_ROOT
     if not _NAS_ROOT.exists():
-        print(f"[Watcher] NAS 경로 없음, 감시 비활성화: {_NAS_ROOT}")
+        log.warning(f"[Watcher] NAS 경로 없음, 감시 비활성화: {_NAS_ROOT}")
         return
 
     _ensure_dirs()
@@ -1308,12 +1325,12 @@ def start_watcher():
     _observer.schedule(handler, str(UNGRADED_MATH),     recursive=False)
     _observer.schedule(handler, str(ANSWER_MATH),       recursive=False)
     _observer.start()
-    print(f"[Watcher] 감시 시작 → {UNGRADED_WORD}")
-    print(f"[Watcher] 감시 시작 → {UNGRADED_ENTRANCE}")
-    print(f"[Watcher] 감시 시작 → {ANSWER_ENTRANCE}")
-    print(f"[Watcher] 감시 시작 → {ANSWER_WORD}")
-    print(f"[Watcher] 감시 시작 → {UNGRADED_MATH}")
-    print(f"[Watcher] 감시 시작 → {ANSWER_MATH}")
+    log.info(f"[Watcher] 감시 시작 → {UNGRADED_WORD}")
+    log.info(f"[Watcher] 감시 시작 → {UNGRADED_ENTRANCE}")
+    log.info(f"[Watcher] 감시 시작 → {ANSWER_ENTRANCE}")
+    log.info(f"[Watcher] 감시 시작 → {ANSWER_WORD}")
+    log.info(f"[Watcher] 감시 시작 → {UNGRADED_MATH}")
+    log.info(f"[Watcher] 감시 시작 → {ANSWER_MATH}")
 
 
 def stop_watcher():
@@ -1321,4 +1338,4 @@ def stop_watcher():
     if _observer:
         _observer.stop()
         _observer.join()
-        print("[Watcher] 감시 종료")
+        log.info("[Watcher] 감시 종료")

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from database import get_db
@@ -55,7 +55,10 @@ class ResultSummary(BaseModel):
 
 @router.get("", response_model=List[ResultSummary])
 def list_results(test_id: Optional[int] = None, student_id: Optional[int] = None, db: Session = Depends(get_db)):
-    q = db.query(models.TestResult)
+    q = db.query(models.TestResult).options(
+        joinedload(models.TestResult.student),
+        joinedload(models.TestResult.test),
+    )
     if test_id:
         q = q.filter(models.TestResult.test_id == test_id)
     if student_id:
@@ -63,8 +66,8 @@ def list_results(test_id: Optional[int] = None, student_id: Optional[int] = None
     rows = q.order_by(models.TestResult.created_at.desc()).all()
     out = []
     for r in rows:
-        student = db.get(models.Student, r.student_id)
-        test = db.get(models.Test, r.test_id)
+        student = r.student
+        test    = r.test
         pct = round(r.score / r.total * 100) if r.total else None
         out.append(ResultSummary(
             id=r.id, student_id=r.student_id,
@@ -162,7 +165,10 @@ def export_excel(test_id: Optional[int] = None, student_id: Optional[int] = None
     from fastapi.responses import StreamingResponse
     import io
 
-    q = db.query(models.TestResult)
+    q = db.query(models.TestResult).options(
+        joinedload(models.TestResult.student).joinedload(models.Student.class_),
+        joinedload(models.TestResult.test),
+    )
     if test_id:
         q = q.filter(models.TestResult.test_id == test_id)
     if student_id:
@@ -175,8 +181,8 @@ def export_excel(test_id: Optional[int] = None, student_id: Optional[int] = None
     ws.append(["학생명", "학년", "반", "시험명", "과목", "점수", "총점", "백분율(%)", "시행일"])
 
     for r in rows:
-        student = db.get(models.Student, r.student_id)
-        test = db.get(models.Test, r.test_id)
+        student = r.student
+        test    = r.test
         class_name = student.class_.name if student and student.class_ else ""
         pct = round(r.score / r.total * 100) if r.total else ""
         ws.append([

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiHeaders } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const inputCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500";
@@ -64,7 +64,7 @@ export default function MathSubmissionsPage() {
       formData.append("image", file);
       formData.append("student_name", form.student_name);
       formData.append("test_id", form.test_id);
-      const res = await fetch(`${BASE}/api/math-submissions`, { method: "POST", body: formData });
+      const res = await fetch(`${BASE}/api/math-submissions`, { method: "POST", body: formData, headers: apiHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "업로드 실패");
       setUploadMsg({ type: "success", msg: `✓ ${form.student_name} 제출 완료. AI 채점 중...` });

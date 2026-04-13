@@ -3,14 +3,15 @@
 우선순위: Gemini → Grok (XAI) → Claude (Anthropic)
 이미지(jpg/png/webp) 및 PDF 지원
 """
+import os
 import base64
 import io
 from pathlib import Path
 from config import GEMINI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY
 
-GEMINI_MODEL  = "gemini-2.5-pro-exp-03-25"
-CLAUDE_MODEL  = "claude-sonnet-4-6"
-CLAUDE_FAST_MODEL = "claude-haiku-4-5-20251001"
+GEMINI_MODEL      = os.environ.get("GEMINI_MODEL",      "gemini-2.5-pro-exp-03-25")
+CLAUDE_MODEL      = os.environ.get("CLAUDE_MODEL",      "claude-sonnet-4-6")
+CLAUDE_FAST_MODEL = os.environ.get("CLAUDE_FAST_MODEL", "claude-haiku-4-5-20251001")
 
 
 def _gemini_client():

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch, Student, Class } from "@/lib/api";
+import { apiFetch, apiHeaders, Student, Class } from "@/lib/api";
 import Link from "next/link";
 
 const GRADES = ["초1","초2","초3","초4","초5","초6","중1","중2","중3","고1","고2","고3"];
@@ -113,6 +113,7 @@ export default function StudentsPage() {
       const res = await fetch(`${BASE}/api/students/import/excel`, {
         method: "POST",
         body: formData,
+        headers: apiHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "임포트 실패");

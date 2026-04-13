@@ -1,12 +1,20 @@
+import json as _json
+import re
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from logger import get_logger
+
+log = get_logger("math_submissions")
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
+from limiter import limiter
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from database import get_db, SessionLocal
 from models import MathTest, MathSubmission, MathSubmissionItem, Student
-from config import UPLOAD_DIR
+from config import UPLOAD_DIR, MAX_UPLOAD_IMAGE
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
 
 router = APIRouter(prefix="/math-submissions", tags=["math-submissions"])
 
@@ -131,9 +139,10 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
 마킹이 불분명하면 student_answer를 null로."""
 
         text = ai_text_call(prompt, max_tokens=1000, fast=True)
-        if text.startswith("```"):
-            text = text.split("```")[1].lstrip("json").strip()
-        results = _json.loads(text.strip())
+        m = _JSON_FENCE_RE.search(text)
+        if m:
+            text = m.group(1).strip()
+        results = _json.loads(text)
 
         score = 0
         for r in results:
@@ -154,20 +163,22 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
         sub.total = len(answers)
         sub.status = "graded"
         db.commit()
-        print(f"[MathSubmission] 채점완료: sub_id={submission_id} {score}/{len(answers)}")
+        log.info(f"[MathSubmission] 채점완료: sub_id={submission_id} {score}/{len(answers)}")
     except Exception as e:
         db.rollback()
         sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()
         if sub:
             sub.status = "error"
             db.commit()
-        print(f"[MathSubmission] 채점실패: {e}")
+        log.error(f"[MathSubmission] 채점실패: {e}")
     finally:
         db.close()
 
 
 @router.post("", status_code=201)
+@limiter.limit("120/minute")
 async def upload_omr(
+    request: Request,
     background_tasks: BackgroundTasks,
     student_name: str = Form(...),
     test_id: int = Form(...),
@@ -179,6 +190,10 @@ async def upload_omr(
         raise HTTPException(404, "시험을 찾을 수 없습니다")
     if not test.answers or not any(a > 0 for a in test.answers):
         raise HTTPException(400, "정답이 등록되지 않은 시험입니다")
+
+    image_bytes = await image.read()
+    if len(image_bytes) > MAX_UPLOAD_IMAGE:
+        raise HTTPException(413, "이미지 파일이 너무 큽니다 (최대 20MB)")
 
     student = db.query(Student).filter(Student.name == student_name).first()
     ext = Path(image.filename).suffix if image.filename else ".jpg"
@@ -195,8 +210,7 @@ async def upload_omr(
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     img_path = UPLOAD_DIR / f"math_sub_{sub.id}{ext}"
-    with open(img_path, "wb") as f:
-        shutil.copyfileobj(image.file, f)
+    img_path.write_bytes(image_bytes)
     sub.image_path = str(img_path)
     db.commit()
 

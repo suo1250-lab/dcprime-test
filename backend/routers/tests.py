@@ -1,8 +1,10 @@
 import json
+import re
 import tempfile
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from ai_utils import ai_call
+from config import MAX_UPLOAD_PDF
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -100,6 +102,8 @@ def delete_test(test_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
+
 def _extract_answers(pdf_path: str) -> dict:
     prompt = """이 이미지는 시험 답안지입니다.
 각 문항 번호와 정답을 추출하여 JSON 객체로만 응답하세요. 다른 텍스트 없이 JSON만:
@@ -109,11 +113,13 @@ def _extract_answers(pdf_path: str) -> dict:
 
     text = ai_call(pdf_path, prompt, max_tokens=2000)
 
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    m = _JSON_FENCE_RE.search(text.strip())
+    if m:
+        text = m.group(1).strip()
+    result = json.loads(text.strip())
+    if not isinstance(result, dict):
+        raise ValueError(f"AI 응답이 dict 형식이 아닙니다: {type(result)}")
+    return result
 
 
 @router.post("/extract-pdf")
@@ -121,6 +127,8 @@ async def extract_pdf_answers(pdf: UploadFile = File(...)):
     if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "PDF 파일만 업로드 가능합니다")
     pdf_bytes = await pdf.read()
+    if len(pdf_bytes) > MAX_UPLOAD_PDF:
+        raise HTTPException(413, "PDF 파일이 너무 큽니다 (최대 200MB)")
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:

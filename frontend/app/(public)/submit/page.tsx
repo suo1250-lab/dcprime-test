@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiFetch, WordTest } from "@/lib/api";
+import { apiFetch, apiHeaders, WordTest } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const GRADES = ["초1","초2","초3","초4","초5","초6","중1","중2","중3","고1","고2","고3"];
@@ -83,6 +83,7 @@ function SubmitPageInner() {
       const res = await fetch(`${BASE}/api/word-submissions`, {
         method: "POST",
         body: formData,
+        headers: apiHeaders(),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, Suspense, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiFetch, Student, WordTest, TutoringSession } from "@/lib/api";
+import { apiFetch, apiHeaders, Student, WordTest, TutoringSession } from "@/lib/api";
 import Link from "next/link";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -120,7 +120,7 @@ function WordTutoringContent() {
       const fd = new FormData();
       fd.append("word_test_id", testId);
       fd.append("image", file);
-      const res = await fetch(`${BASE}/api/word-tutoring/grade-image`, { method: "POST", body: fd });
+      const res = await fetch(`${BASE}/api/word-tutoring/grade-image`, { method: "POST", body: fd, headers: apiHeaders() });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail ?? "AI 채점 실패"); }
       const data: { total: number; correct: number; wrong: number } = await res.json();
       const totalKey = `attempt${attemptNo}_total` as keyof typeof form;
@@ -148,7 +148,7 @@ function WordTutoringContent() {
       const fd = new FormData();
       fd.append("word_test_id", String(s.word_test_id));
       fd.append("image", file);
-      const res = await fetch(`${BASE}/api/word-tutoring/grade-image`, { method: "POST", body: fd });
+      const res = await fetch(`${BASE}/api/word-tutoring/grade-image`, { method: "POST", body: fd, headers: apiHeaders() });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail ?? "AI 채점 실패"); }
       const data: { total: number; correct: number; wrong: number } = await res.json();
       const patch: Record<string, number | null> = {

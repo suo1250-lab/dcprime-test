@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, Float, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -111,6 +111,8 @@ class WordTest(Base):
     grade = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)
     test_date = Column(Date, nullable=False)
+    correct_threshold = Column(Float, nullable=False, default=0.85)
+    ambiguous_threshold = Column(Float, nullable=False, default=0.65)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     items = relationship("WordTestItem", back_populates="word_test", cascade="all, delete-orphan", order_by="WordTestItem.item_no")
     submissions = relationship("WordSubmission", back_populates="word_test", cascade="save-update, merge")

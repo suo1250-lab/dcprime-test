@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { apiHeaders } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -18,6 +19,7 @@ export default function WordAnswerKeyPage() {
       const res = await fetch(`${BASE}/api/nas/upload/answer-word`, {
         method: "POST",
         body: formData,
+        headers: apiHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "업로드 실패");

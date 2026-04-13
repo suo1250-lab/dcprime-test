@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from limiter import limiter
 from sqlalchemy.orm import Session
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
@@ -9,6 +10,9 @@ from database import Base
 import models
 import json
 import re
+import threading
+
+_ingest_lock = threading.Lock()
 
 router = APIRouter(prefix="/historical", tags=["historical"])
 
@@ -233,7 +237,7 @@ def _run_ingest():
     from config import HISTORICAL_SCAN_DIR
 
     global _ingest_status
-    _ingest_status.update({"running": True, "total": 0, "done": 0, "skipped": 0, "errors": 0, "log": []})
+    _ingest_status.update({"total": 0, "done": 0, "skipped": 0, "errors": 0, "current": "", "log": []})
 
     folders = {
         "배정확정": "배정확정",
@@ -275,7 +279,7 @@ def _run_ingest():
                 subject = data.get("subject")
                 score = data.get("score")
                 total = data.get("total")
-                score_pct = round(score / total * 100) if score and total else None
+                score_pct = round(score / total * 100) if (score is not None and total) else None
                 q_results = data.get("question_results") or {}
 
                 hs = models.HistoricalStudent(
@@ -309,9 +313,12 @@ def _run_ingest():
 
 
 @router.post("/ingest", status_code=202)
-def start_ingest(background_tasks: BackgroundTasks):
-    if _ingest_status["running"]:
-        raise HTTPException(409, "이미 실행 중입니다")
+@limiter.limit("10/minute")
+def start_ingest(request: Request, background_tasks: BackgroundTasks):
+    with _ingest_lock:
+        if _ingest_status["running"]:
+            raise HTTPException(409, "이미 실행 중입니다")
+        _ingest_status["running"] = True  # 락 안에서 선점
     background_tasks.add_task(_run_ingest)
     return {"message": "인제스트 시작됨"}
 

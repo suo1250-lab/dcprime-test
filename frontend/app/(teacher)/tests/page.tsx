@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { apiFetch, Test } from "@/lib/api";
+import { apiFetch, apiHeaders, Test } from "@/lib/api";
 
 const GRADES = ["초1","초2","초3","초4","초5","초6","중1","중2","중3","고1","고2","고3"];
 const SUBJECTS = ["수학","영어","국어","과학","사회"];
@@ -45,7 +45,7 @@ export default function TestsPage() {
       const formData = new FormData();
       formData.append("pdf", file);
       const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const res = await fetch(`${BASE}/api/tests/extract-pdf`, { method: "POST", body: formData });
+      const res = await fetch(`${BASE}/api/tests/extract-pdf`, { method: "POST", body: formData, headers: apiHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "추출 실패");
       setAnswers(data.answers);
@@ -120,7 +120,7 @@ export default function TestsPage() {
     if (tagTestId === t.id) { setTagTestId(null); return; }
     setTagTestId(t.id);
     const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    const res = await fetch(`${BASE}/api/tests/${t.id}/tags`);
+    const res = await fetch(`${BASE}/api/tests/${t.id}/tags`, { headers: apiHeaders() });
     const data = await res.json();
     const init: Record<string, string> = {};
     for (let i = 1; i <= t.question_count; i++) init[String(i)] = data[String(i)] ?? "";
@@ -133,7 +133,7 @@ export default function TestsPage() {
     const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
     await fetch(`${BASE}/api/tests/${tagTestId}/tags`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(tags),
     });
     setTagSaving(false);

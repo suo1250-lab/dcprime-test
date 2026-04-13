@@ -1,8 +1,13 @@
 import json
+import re
 import shutil
 import tempfile
+from logger import get_logger
+
+log = get_logger("word_tutoring")
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from limiter import limiter
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -10,6 +15,9 @@ from datetime import date
 from database import get_db
 import models
 from ai_utils import ai_call
+from config import MAX_UPLOAD_IMAGE
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
 
 
 def _grade_with_ai(image_path: str, items: list) -> list:
@@ -28,13 +36,12 @@ def _grade_with_ai(image_path: str, items: list) -> list:
   ...
 ]"""
         text = ai_call(image_path, prompt, max_tokens=2000)
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text.strip())
+        m = _JSON_FENCE_RE.search(text)
+        if m:
+            text = m.group(1).strip()
+        return json.loads(text)
     except Exception as e:
-        print(f"AI grading error: {e}")
+        log.error(f"AI grading error: {e}")
         return []
 
 router = APIRouter(prefix="/word-tutoring", tags=["word-tutoring"])
@@ -153,7 +160,9 @@ def export_excel(student_id: Optional[int] = None, db: Session = Depends(get_db)
 
 
 @router.post("/grade-image")
+@limiter.limit("60/minute")
 async def grade_image(
+    request: Request,
     word_test_id: int = Form(...),
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -163,9 +172,12 @@ async def grade_image(
         raise HTTPException(404, "시험을 찾을 수 없습니다")
     items_data = [{"item_no": i.item_no, "question": i.question, "answer": i.answer} for i in test.items]
 
+    image_bytes = await image.read()
+    if len(image_bytes) > MAX_UPLOAD_IMAGE:
+        raise HTTPException(413, "이미지 파일이 너무 큽니다 (최대 20MB)")
     ext = Path(image.filename).suffix if image.filename else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        shutil.copyfileobj(image.file, tmp)
+        tmp.write(image_bytes)
         tmp_path = tmp.name
     try:
         results = _grade_with_ai(tmp_path, items_data)

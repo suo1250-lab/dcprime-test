@@ -1,8 +1,13 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_SECRET = process.env.NEXT_PUBLIC_API_SECRET ?? "";
+
+export function apiHeaders(extra?: Record<string, string>): Record<string, string> {
+  return { "X-API-Secret": API_SECRET, ...extra };
+}
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-API-Secret": API_SECRET },
     ...options,
   });
   if (!res.ok) {
@@ -62,6 +67,7 @@ export interface AssignmentRow {
 }
 export interface WordTest {
   id: number; title: string; grade: string; direction: string; test_date: string; item_count: number;
+  correct_threshold: number; ambiguous_threshold: number;
 }
 export interface WordTestDetail {
   id: number; title: string; grade: string; direction: string; test_date: string;

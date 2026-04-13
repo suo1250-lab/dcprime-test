@@ -23,6 +23,22 @@ MIGRATIONS = [
         """,
         "sql": "ALTER TABLE students ADD COLUMN teacher VARCHAR(50)",
     },
+    {
+        "name": "add_correct_threshold_to_word_tests",
+        "check": """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'word_tests' AND column_name = 'correct_threshold'
+        """,
+        "sql": "ALTER TABLE word_tests ADD COLUMN correct_threshold FLOAT NOT NULL DEFAULT 0.85",
+    },
+    {
+        "name": "add_ambiguous_threshold_to_word_tests",
+        "check": """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'word_tests' AND column_name = 'ambiguous_threshold'
+        """,
+        "sql": "ALTER TABLE word_tests ADD COLUMN ambiguous_threshold FLOAT NOT NULL DEFAULT 0.65",
+    },
 ]
 
 def run():

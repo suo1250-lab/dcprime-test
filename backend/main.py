@@ -21,8 +21,48 @@ from routers import math_tests, math_submissions
 from watcher import start_watcher, stop_watcher
 
 
+def _run_migrations():
+    """컨테이너 시작 시 DB 마이그레이션 자동 적용"""
+    import sys
+    from sqlalchemy import create_engine, text
+    from config import DATABASE_URL
+    MIGRATIONS = [
+        {
+            "name": "add_teacher_to_students",
+            "check": "SELECT column_name FROM information_schema.columns WHERE table_name='students' AND column_name='teacher'",
+            "sql": "ALTER TABLE students ADD COLUMN teacher VARCHAR(50)",
+        },
+        {
+            "name": "add_correct_threshold_to_word_tests",
+            "check": "SELECT column_name FROM information_schema.columns WHERE table_name='word_tests' AND column_name='correct_threshold'",
+            "sql": "ALTER TABLE word_tests ADD COLUMN correct_threshold FLOAT NOT NULL DEFAULT 0.85",
+        },
+        {
+            "name": "add_ambiguous_threshold_to_word_tests",
+            "check": "SELECT column_name FROM information_schema.columns WHERE table_name='word_tests' AND column_name='ambiguous_threshold'",
+            "sql": "ALTER TABLE word_tests ADD COLUMN ambiguous_threshold FLOAT NOT NULL DEFAULT 0.65",
+        },
+    ]
+    import logging
+    log = logging.getLogger("migrate")
+    try:
+        engine = create_engine(DATABASE_URL)
+        with engine.connect() as conn:
+            for m in MIGRATIONS:
+                exists = conn.execute(text(m["check"])).fetchone()
+                if exists:
+                    log.info(f"[migrate] SKIP {m['name']}")
+                else:
+                    conn.execute(text(m["sql"]))
+                    conn.commit()
+                    log.info(f"[migrate] OK   {m['name']}")
+    except Exception as e:
+        log.error(f"[migrate] 에러: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _run_migrations()
     start_watcher()
     yield
     stop_watcher()

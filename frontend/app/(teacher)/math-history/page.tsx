@@ -8,6 +8,7 @@ import {
 
 const inputCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500";
 
+interface MathTest { id: number; title: string; grade: string; test_date: string; }
 interface Student { id: number; name: string; grade: string; }
 
 interface MathSubmissionDetail {
@@ -18,6 +19,7 @@ interface MathSubmissionDetail {
   score: number;
   total: number;
   status: string;
+  student_name: string;
   class_avg: number | null;   // 반 평균 % (0~100)
   class_rank: number | null;  // 반 석차
   class_total: number | null; // 반 응시 인원
@@ -30,13 +32,23 @@ interface MathSubmissionDetail {
 }
 
 export default function MathHistoryPage() {
+  const [tab, setTab] = useState<"individual" | "class">("individual");
+
+  // 개별 성적
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [submissions, setSubmissions] = useState<MathSubmissionDetail[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 반별/시험별
+  const [mathTests, setMathTests] = useState<MathTest[]>([]);
+  const [classTestId, setClassTestId] = useState("");
+  const [classSubmissions, setClassSubmissions] = useState<MathSubmissionDetail[]>([]);
+  const [classLoading, setClassLoading] = useState(false);
+
   useEffect(() => {
     apiFetch<Student[]>("/students").then(setStudents).catch(() => {});
+    apiFetch<MathTest[]>("/math-tests").then(setMathTests).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -47,6 +59,15 @@ export default function MathHistoryPage() {
       .catch(() => setSubmissions([]))
       .finally(() => setLoading(false));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!classTestId) { setClassSubmissions([]); return; }
+    setClassLoading(true);
+    apiFetch<MathSubmissionDetail[]>(`/math-submissions?test_id=${classTestId}&detail=true`)
+      .then((data) => setClassSubmissions(data.filter((s) => s.status === "graded" && s.total > 0)))
+      .catch(() => setClassSubmissions([]))
+      .finally(() => setClassLoading(false));
+  }, [classTestId]);
 
   const selected = students.find((s) => String(s.id) === selectedId);
   const graded = submissions.filter((s) => s.status === "graded" && s.total > 0);
@@ -97,10 +118,158 @@ export default function MathHistoryPage() {
     ? Math.min(...graded.filter((s) => s.class_rank != null).map((s) => s.class_rank!))
     : null;
 
+  // 반별 뷰 계산
+  const classGraded = classSubmissions;
+  const classAvgPct = classGraded.length > 0
+    ? Math.round(classGraded.reduce((s, r) => s + Math.round((r.score / r.total) * 100), 0) / classGraded.length)
+    : null;
+  const classMax = classGraded.length > 0 ? Math.max(...classGraded.map((r) => Math.round((r.score / r.total) * 100))) : null;
+  const classMin = classGraded.length > 0 ? Math.min(...classGraded.map((r) => Math.round((r.score / r.total) * 100))) : null;
+  const classSorted = [...classGraded].sort((a, b) => (b.score / b.total) - (a.score / a.total));
+
+  // 점수 분포 (10점 단위)
+  const distMap: Record<string, number> = {};
+  classGraded.forEach((r) => {
+    const pct = Math.round((r.score / r.total) * 100);
+    const band = `${Math.floor(pct / 10) * 10}점대`;
+    distMap[band] = (distMap[band] ?? 0) + 1;
+  });
+  const distData = Array.from({ length: 10 }, (_, i) => ({
+    band: `${i * 10}점대`,
+    count: distMap[`${i * 10}점대`] ?? 0,
+  })).filter((d) => d.count > 0);
+
   return (
     <div>
-      <h1 className="text-xl font-bold mb-6 text-gray-900 dark:text-gray-100">수학 성적 추이</h1>
+      <h1 className="text-xl font-bold mb-4 text-gray-900 dark:text-gray-100">수학 성적 추이</h1>
 
+      {/* 탭 */}
+      <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-700">
+        {([["individual", "개별 성적"], ["class", "반별 · 시험별"]] as const).map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === key
+                ? "border-orange-500 text-orange-600 dark:text-orange-400"
+                : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ───── 반별/시험별 탭 ───── */}
+      {tab === "class" && (
+        <div>
+          <div className="flex gap-3 items-center mb-6">
+            <select value={classTestId} onChange={(e) => setClassTestId(e.target.value)} className={inputCls + " w-72"}>
+              <option value="">시험 선택...</option>
+              {mathTests.map((t) => (
+                <option key={t.id} value={t.id}>{t.title} ({t.grade} · {t.test_date})</option>
+              ))}
+            </select>
+            {classGraded.length > 0 && (
+              <span className="text-sm text-gray-500 dark:text-gray-400">응시 {classGraded.length}명</span>
+            )}
+          </div>
+
+          {!classTestId && (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center text-gray-400 dark:text-gray-500 shadow-sm">
+              시험을 선택하면 응시 학생 전체 성적을 확인할 수 있습니다
+            </div>
+          )}
+          {classTestId && classLoading && <div className="text-center text-gray-400 py-12">불러오는 중...</div>}
+          {classTestId && !classLoading && classGraded.length === 0 && (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center text-gray-400 dark:text-gray-500 shadow-sm">
+              채점 완료된 응시자가 없습니다
+            </div>
+          )}
+
+          {classTestId && !classLoading && classGraded.length > 0 && (
+            <div className="space-y-5">
+              {/* 요약 카드 */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "응시 인원", value: `${classGraded.length}명`, color: "text-indigo-600 dark:text-indigo-400" },
+                  { label: "반 평균", value: `${classAvgPct}%`, color: "text-orange-600 dark:text-orange-400" },
+                  { label: "최고 점수", value: `${classMax}%`, color: "text-green-600 dark:text-green-400" },
+                  { label: "최저 점수", value: `${classMin}%`, color: "text-red-500 dark:text-red-400" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{label}</p>
+                    <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* 점수 분포 */}
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">점수 분포</h2>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={distData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="band" tick={{ fontSize: 11, fill: "#9ca3af" }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#9ca3af" }} />
+                    <Tooltip formatter={(v) => [`${v}명`, "인원"]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                    <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#f97316" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* 학생별 성적 테이블 (석차 순) */}
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        {["석차", "이름", "점수", "정답률", "반 평균 대비", "오답 문항"].map((h) => (
+                          <th key={h} className="text-left px-4 py-3 font-semibold text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {classSorted.map((s, idx) => {
+                        const pct = Math.round((s.score / s.total) * 100);
+                        const diff = classAvgPct != null ? pct - classAvgPct : null;
+                        const wrong = s.items?.filter((i) => !i.is_correct).map((i) => i.question_no).sort((a, b) => a - b) ?? [];
+                        return (
+                          <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                            <td className="px-4 py-3 font-bold text-gray-700 dark:text-gray-200">{idx + 1}등</td>
+                            <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-100">{s.student_name}</td>
+                            <td className="px-4 py-3 font-bold text-orange-600 dark:text-orange-400">{s.score}/{s.total}</td>
+                            <td className="px-4 py-3">
+                              <span className={`font-bold ${pct >= 80 ? "text-green-600 dark:text-green-400" : pct >= 60 ? "text-orange-500" : "text-red-500"}`}>{pct}%</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {diff != null ? (
+                                <span className={diff >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"}>
+                                  {diff >= 0 ? "▲" : "▼"}{Math.abs(diff)}%p
+                                </span>
+                              ) : "-"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap gap-1">
+                                {wrong.length === 0
+                                  ? <span className="text-xs text-green-500">만점</span>
+                                  : wrong.map((q) => (
+                                    <span key={q} className="text-xs bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 px-1.5 py-0.5 rounded">{q}번</span>
+                                  ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ───── 개별 성적 탭 ───── */}
+      {tab === "individual" && (
+      <div>
       {/* 학생 선택 */}
       <div className="flex gap-3 items-center mb-6">
         <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className={inputCls + " w-52"}>
@@ -278,6 +447,8 @@ export default function MathHistoryPage() {
           </div>
 
         </div>
+      )}
+      </div>
       )}
     </div>
   );

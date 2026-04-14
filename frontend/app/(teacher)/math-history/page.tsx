@@ -145,7 +145,7 @@ export default function MathHistoryPage() {
 
       {/* 탭 */}
       <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-700">
-        {([["individual", "개별 성적"], ["class", "반별 · 시험별"]] as const).map(([key, label]) => (
+        {([["individual", "개별 성적"], ["class", "시험별"]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
               tab === key

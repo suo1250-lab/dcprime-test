@@ -1,6 +1,4 @@
-import json as _json
 import re
-import shutil
 from pathlib import Path
 from logger import get_logger
 

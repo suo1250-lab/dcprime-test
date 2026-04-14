@@ -1,9 +1,9 @@
 import os
 from contextlib import asynccontextmanager
-import logger as _logger_init  # 앱 시작 시 로깅 설정 적용
+import logger as _logger_init  # noqa: F401 — 앱 시작 시 로깅 설정 사이드 이펙트
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from limiter import limiter
@@ -22,7 +22,6 @@ from watcher import start_watcher, stop_watcher
 
 def _run_migrations():
     """컨테이너 시작 시 DB 마이그레이션 자동 적용"""
-    import sys
     from sqlalchemy import create_engine, text
     from config import DATABASE_URL
     MIGRATIONS = [

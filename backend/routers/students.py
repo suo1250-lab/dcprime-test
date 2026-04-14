@@ -4,7 +4,7 @@ from config import MAX_UPLOAD_EXCEL
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from database import get_db
 import models
 

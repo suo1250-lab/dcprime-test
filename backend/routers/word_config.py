@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from database import get_db
-from models import TeacherWordConfig, Class, WordTest, Student
+from models import TeacherWordConfig, Class, Student
 
 router = APIRouter(prefix="/word-config", tags=["word-config"])
 

@@ -1,7 +1,6 @@
 import io
 import json
 import re
-import shutil
 from pathlib import Path
 from datetime import date
 from logger import get_logger
@@ -269,7 +268,7 @@ async def submit(
 
     image_bytes = await image.read()
     if len(image_bytes) > MAX_UPLOAD_IMAGE:
-        raise HTTPException(413, f"이미지 파일이 너무 큽니다 (최대 20MB)")
+        raise HTTPException(413, "이미지 파일이 너무 큽니다 (최대 20MB)")
 
     ext        = Path(image.filename).suffix if image.filename else ".jpg"
     submission = WordSubmission(

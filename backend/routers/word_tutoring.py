@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 import tempfile
 from logger import get_logger
 

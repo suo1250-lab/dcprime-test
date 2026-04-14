@@ -1,12 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from limiter import limiter
 from sqlalchemy.orm import Session
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.sql import func
 from pydantic import BaseModel
 from typing import Optional, List
 from database import get_db, SessionLocal
-from database import Base
 import models
 import json
 import re
@@ -232,7 +229,6 @@ def _parse_json(raw: str) -> dict:
 
 
 def _run_ingest():
-    from pathlib import Path
     from ai_utils import ai_call
     from config import HISTORICAL_SCAN_DIR
 

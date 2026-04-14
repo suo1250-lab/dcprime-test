@@ -658,7 +658,7 @@ def process_pdf_file(filepath: Path, paper_type: str):
         return
 
     if not students_info:
-        log.info(f"[Watcher] 학생 감지 결과 없음")
+        log.info("[Watcher] 학생 감지 결과 없음")
         doc.close()
         _move_to_error(filepath)
         return
@@ -938,7 +938,7 @@ direction: 한→영이면 KR_EN, 영→한이면 EN_KR."""
                     all_items.extend(items)
                     log.info(f"[Watcher] DAY {day_no}: {len(items)}개 추출 (누적 {len(all_items)}개)")
             else:
-                log.info(f"[Watcher] DAY 구분 없음, 청크별 추출")
+                log.info("[Watcher] DAY 구분 없음, 청크별 추출")
                 chunk_size = 2000
                 for i in range(0, len(full_text), chunk_size):
                     chunk = full_text[i:i + chunk_size]
@@ -1149,14 +1149,14 @@ def _process_math_answer_key(filepath: Path):
             is_omr = len(extracted.strip()) < 200
 
         if is_omr:
-            log.info(f"[Watcher] 수학 답지 → OMR 형식 (Haiku)")
+            log.info("[Watcher] 수학 답지 → OMR 형식 (Haiku)")
             prompt = f"""이것은 수학 시험 OMR 정답지입니다.
 각 문항의 정답 번호(1~5)를 읽고 다음 JSON으로 응답하세요. 다른 텍스트 없이 JSON만:
 {{"title": "시험 제목", "grade": "학년(중1/중2/중3/고1/고2/고3)", "test_date": "YYYY-MM-DD", "answers": [3, 1, 4, 1, 5]}}
 answers는 문항 순서대로의 정답 번호 배열(1~5). test_date 없으면 오늘 날짜({date.today()})."""
             response = _ai_call(str(filepath), prompt, max_tokens=2000)
         else:
-            log.info(f"[Watcher] 수학 답지 → 텍스트 형식 (Sonnet)")
+            log.info("[Watcher] 수학 답지 → 텍스트 형식 (Sonnet)")
             extracted = _extract_pdf_text(filepath)
             prompt = f"""다음은 수학 시험 정답지 텍스트입니다:
 {extracted[:3000]}

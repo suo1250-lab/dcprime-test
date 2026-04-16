@@ -26,13 +26,13 @@ interface MathSubmission {
 
 interface AnswerDetail {
   question_no: number;
-  student_answer: number;
+  student_answer: number | null;
   correct_answer: number;
   is_correct: boolean;
 }
 
 interface MathSubmissionDetail extends MathSubmission {
-  answers: AnswerDetail[];
+  items: AnswerDetail[];
 }
 
 export default function MathSubmissionsPage() {
@@ -181,7 +181,7 @@ export default function MathSubmissionsPage() {
             {expandedId === s.id && detail && detail.id === s.id && (
               <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-4">
                 <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-                  {detail.answers.map((a) => (
+                  {detail.items.map((a) => (
                     <div key={a.question_no} className={`flex flex-col items-center gap-1 p-2 rounded-lg ${a.is_correct ? "bg-green-50 dark:bg-green-900/30" : "bg-red-50 dark:bg-red-900/30"}`}>
                       <span className="text-xs text-gray-400 dark:text-gray-500">{a.question_no}번</span>
                       <span className={`font-bold text-base ${a.is_correct ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"}`}>

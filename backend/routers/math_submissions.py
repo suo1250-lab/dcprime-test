@@ -132,13 +132,15 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
         if not sub:
             return
 
-        prompt = f"""이것은 수학 시험 OMR 답안지입니다. 각 문항의 마킹된 번호(1~5)를 읽어주세요.
-정답지: {answers}  (인덱스 0 = 1번 문항 정답, ...)
-각 문항에서 학생이 마킹한 번호를 읽고 다음 JSON으로만 응답하세요:
-[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}},...]
-마킹이 불분명하면 student_answer를 null로."""
+        num_questions = len(answers)
+        prompt = f"""이것은 수학 시험 OMR 답안지 이미지입니다.
+총 {num_questions}문항이 있으며, 각 문항에서 학생이 실제로 마킹(칠한)한 번호(1~5)를 정확히 읽어주세요.
+정답을 유추하지 말고, 이미지에서 실제로 마킹된 번호만 읽으세요.
+마킹이 여러 개면 가장 진하게 칠해진 번호를, 불분명하면 null로.
+반드시 아래 JSON 배열 형식으로만 응답하세요 (다른 텍스트 없이):
+[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}},...]"""
 
-        text = ai_call(image_path, prompt, max_tokens=1000, fast=True)
+        text = ai_call(image_path, prompt, max_tokens=1000, fast=False)
         m = _JSON_FENCE_RE.search(text)
         if m:
             text = m.group(1).strip()
@@ -186,14 +188,17 @@ def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
         if not sub:
             return
 
-        prompt = f"""이것은 수학 시험 OMR 답안지입니다.
-답안지에 적힌 학생 이름(이름란, 성명란 등)과 각 문항의 마킹된 번호(1~5)를 읽어주세요.
-정답지(0번 인덱스=1번 문항): {answers}
-반드시 아래 JSON 형식으로만 응답하세요:
+        num_questions = len(answers)
+        prompt = f"""이것은 수학 시험 OMR 답안지 이미지입니다.
+1) 답안지에 적힌 학생 이름(이름란, 성명란)을 읽으세요.
+2) 총 {num_questions}문항에서 학생이 실제로 마킹(칠한)한 번호(1~5)를 정확히 읽으세요.
+정답을 유추하지 말고, 이미지에서 실제로 마킹된 번호만 읽으세요.
+마킹이 여러 개면 가장 진하게 칠해진 번호를, 불분명하면 null로.
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
 {{"student_name":"홍길동","answers":[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}}]}}
-마킹 불분명시 student_answer=null, 이름 인식 불가시 student_name=null"""
+이름 인식 불가시 student_name=null"""
 
-        text = ai_call(image_path, prompt, max_tokens=1500, fast=True)
+        text = ai_call(image_path, prompt, max_tokens=1500, fast=False)
         m = _JSON_FENCE_RE.search(text)
         if m:
             text = m.group(1).strip()

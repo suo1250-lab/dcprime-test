@@ -36,6 +36,15 @@ const menus = [
       { href: "/math-history", label: "성적 추이" },
     ],
   },
+  {
+    label: "분석리포트",
+    items: [
+      { href: "/word-tutoring", label: "튜터링 이력" },
+      { href: "/math-history", label: "수학 성적 추이" },
+      { href: "/math-history?tab=class", label: "반별 성적" },
+      { href: "/subject-analysis", label: "세부 분석" },
+    ],
+  },
 ];
 
 function DropdownMenu({ label, items }: { label: string; items: { href: string; label: string }[] }) {

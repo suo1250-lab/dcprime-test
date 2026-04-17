@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import {
   LineChart, Line, BarChart, Bar,
@@ -32,8 +33,11 @@ interface MathSubmissionDetail {
   }[];
 }
 
-export default function MathHistoryPage() {
-  const [tab, setTab] = useState<"individual" | "class">("individual");
+function MathHistoryContent() {
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<"individual" | "class">(
+    searchParams.get("tab") === "class" ? "class" : "individual"
+  );
 
   // 개별 성적
   const [students, setStudents] = useState<Student[]>([]);
@@ -647,5 +651,13 @@ export default function MathHistoryPage() {
       </div>
       )}
     </div>
+  );
+}
+
+export default function MathHistoryPage() {
+  return (
+    <Suspense fallback={<div className="text-gray-400 py-20 text-center">불러오는 중...</div>}>
+      <MathHistoryContent />
+    </Suspense>
   );
 }

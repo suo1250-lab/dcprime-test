@@ -127,11 +127,7 @@ def _detect_students_in_pdf(pdf_path: str, paper_type: str) -> list:
 def _make_graded_filename(student: models.Student, db, suffix: str = ".pdf") -> str:
     """YYYYMMDD_반이름_학생이름{suffix} 형식"""
     today      = date.today().strftime("%Y%m%d")
-    class_name = ""
-    if student.class_id:
-        cls = db.get(models.Class, student.class_id)
-        if cls:
-            class_name = cls.name
+    class_name = student.classes[0].name if student.classes else ""
     return f"{today}_{class_name}_{student.name}{suffix}"
 
 
@@ -241,7 +237,7 @@ def _match_student(db, name: str, class_name: str = ""):
                 models.Class.name.ilike(f"%{class_name}%")
             ).first()
             if cls:
-                matched = [s for s in students if s.class_id == cls.id]
+                matched = [s for s in students if any(c.id == cls.id for c in s.classes)]
                 if matched:
                     return matched[0]
         return students[0]
@@ -254,7 +250,7 @@ def _match_student(db, name: str, class_name: str = ""):
         ).first()
         if cls:
             class_students = db.query(models.Student).filter(
-                models.Student.class_id == cls.id
+                models.Student.classes.any(models.Class.id == cls.id)
             ).all()
             candidates = [
                 (s, _name_similarity(name, s.name))
@@ -303,8 +299,8 @@ def _match_word_test(db, word_range: str):
 
 def _find_word_config(db, student):
     """반 설정 우선, 없으면 선생님 설정 사용. (word_test_id, day_start, day_end) 반환."""
-    if student.class_id:
-        cls = db.get(models.Class, student.class_id)
+    if student.classes:
+        cls = student.classes[0]
         if cls and cls.word_test_id:
             return cls.word_test_id, cls.word_day_start, cls.word_day_end
     if student.teacher:

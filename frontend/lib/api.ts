@@ -19,11 +19,11 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
 export interface Student {
   id: number; name: string; grade: string; school: string | null;
-  class_id: number | null; phone: string | null; teacher: string | null; historical_student_id: number | null;
+  class_ids: number[]; class_names: string[]; phone: string | null; teacher: string | null; historical_student_id: number | null;
 }
 export interface StudentProfile {
   id: number; name: string; grade: string; school: string | null;
-  phone: string | null; teacher: string | null; class_id: number | null; class_name: string | null;
+  phone: string | null; teacher: string | null; class_ids: number[]; class_names: string[];
   historical_student_id: number | null;
   test_results: {
     test_id: number; test_title: string; subject: string; grade: string;

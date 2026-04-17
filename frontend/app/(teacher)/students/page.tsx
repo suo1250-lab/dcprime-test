@@ -10,7 +10,7 @@ const inputCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 py
 const selectCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 const cellInputCls = "border border-gray-200 dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full";
 
-interface EditForm { name: string; grade: string; school: string; class_id: string; phone: string; teacher: string; }
+interface EditForm { name: string; grade: string; school: string; class_ids: string[]; phone: string; teacher: string; }
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -20,7 +20,7 @@ export default function StudentsPage() {
   const [filterGrade, setFilterGrade] = useState("");
   const [error, setError] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<EditForm>({ name: "", grade: "중1", school: "", class_id: "", phone: "", teacher: "" });
+  const [editForm, setEditForm] = useState<EditForm>({ name: "", grade: "중1", school: "", class_ids: [], phone: "", teacher: "" });
   const [saving, setSaving] = useState(false);
 
   // 엑셀 import 관련
@@ -46,9 +46,10 @@ export default function StudentsPage() {
       await apiFetch("/students", {
         method: "POST",
         body: JSON.stringify({
-          ...form,
+          name: form.name,
+          grade: form.grade,
           school: form.school || null,
-          class_id: form.class_id ? Number(form.class_id) : null,
+          class_ids: form.class_id ? [Number(form.class_id)] : [],
           phone: form.phone || null,
           teacher: form.teacher || null,
         }),
@@ -73,7 +74,7 @@ export default function StudentsPage() {
       name: s.name,
       grade: s.grade,
       school: s.school ?? "",
-      class_id: s.class_id ? String(s.class_id) : "",
+      class_ids: s.class_ids.map(String),
       phone: s.phone ?? "",
       teacher: s.teacher ?? "",
     });
@@ -89,7 +90,7 @@ export default function StudentsPage() {
           name: editForm.name,
           grade: editForm.grade,
           school: editForm.school || null,
-          class_id: editForm.class_id ? Number(editForm.class_id) : null,
+          class_ids: editForm.class_ids.map(Number),
           phone: editForm.phone || null,
           teacher: editForm.teacher || null,
           historical_student_id: students.find((s) => s.id === editId)?.historical_student_id ?? null,
@@ -242,10 +243,22 @@ export default function StudentsPage() {
                     </td>
                     <td className="px-3 py-2"><input value={editForm.school} onChange={(e) => setEditForm({ ...editForm, school: e.target.value })} className={cellInputCls + " w-28"} /></td>
                     <td className="px-3 py-2">
-                      <select value={editForm.class_id} onChange={(e) => setEditForm({ ...editForm, class_id: e.target.value })} className={cellInputCls + " w-28"}>
-                        <option value="">미배정</option>
-                        {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
+                      <div className="flex flex-wrap gap-1 max-w-[160px]">
+                        {classes.map((c) => (
+                          <label key={c.id} className="flex items-center gap-1 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editForm.class_ids.includes(String(c.id))}
+                              onChange={(e) => {
+                                const id = String(c.id);
+                                setEditForm({ ...editForm, class_ids: e.target.checked ? [...editForm.class_ids, id] : editForm.class_ids.filter((x) => x !== id) });
+                              }}
+                              className="rounded"
+                            />
+                            {c.name}
+                          </label>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-3 py-2"><input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className={cellInputCls + " w-32"} /></td>
                     <td className="px-3 py-2"><input value={editForm.teacher} onChange={(e) => setEditForm({ ...editForm, teacher: e.target.value })} className={cellInputCls + " w-24"} placeholder="선생님" /></td>
@@ -261,7 +274,11 @@ export default function StudentsPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{s.grade}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.school ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{classMap.get(s.class_id ?? 0)?.name ?? <span className="text-gray-400 dark:text-gray-500">미배정</span>}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                      {s.class_names.length > 0
+                        ? <span className="flex flex-wrap gap-1">{s.class_names.map((n) => <span key={n} className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs px-1.5 py-0.5 rounded">{n}</span>)}</span>
+                        : <span className="text-gray-400 dark:text-gray-500">미배정</span>}
+                    </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.phone ?? "-"}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.teacher ?? "-"}</td>
                     <td className="px-4 py-3 whitespace-nowrap">

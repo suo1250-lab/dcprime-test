@@ -1,7 +1,16 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, Float, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, Float, ForeignKey, DateTime, UniqueConstraint, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
+
+
+# Student ↔ Class 다대다 중간 테이블
+student_classes = Table(
+    "student_classes",
+    Base.metadata,
+    Column("student_id", Integer, ForeignKey("students.id", ondelete="CASCADE"), primary_key=True),
+    Column("class_id", Integer, ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Class(Base):
@@ -16,7 +25,7 @@ class Class(Base):
     word_day_start = Column(Integer, nullable=True)
     word_day_end = Column(Integer, nullable=True)
 
-    students = relationship("Student", back_populates="class_")
+    students = relationship("Student", secondary=student_classes, back_populates="classes")
     rules = relationship("ClassRule", back_populates="class_")
     word_test = relationship("WordTest", foreign_keys=[word_test_id])
 
@@ -28,14 +37,21 @@ class Student(Base):
     name = Column(String(50), nullable=False)
     grade = Column(String(20), nullable=False)
     school = Column(String(100), nullable=True)
-    class_id = Column(Integer, ForeignKey("classes.id", ondelete="SET NULL"), nullable=True)
     phone = Column(String(20), nullable=True)
     historical_student_id = Column(Integer, ForeignKey("historical_students.id", ondelete="SET NULL"), nullable=True)
     teacher = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    class_ = relationship("Class", back_populates="students")
+    classes = relationship("Class", secondary=student_classes, back_populates="students")
     results = relationship("TestResult", back_populates="student")
+
+    @property
+    def class_ids(self):
+        return [c.id for c in self.classes]
+
+    @property
+    def class_names(self):
+        return [c.name for c in self.classes]
 
 
 class Test(Base):

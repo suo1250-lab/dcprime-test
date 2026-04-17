@@ -65,12 +65,7 @@ def get_class_members(class_id: int, db: Session = Depends(get_db)):
     cls = db.get(models.Class, class_id)
     if not cls:
         raise HTTPException(404, "반을 찾을 수 없습니다")
-    students = (
-        db.query(models.Student)
-        .filter(models.Student.class_id == class_id)
-        .order_by(models.Student.grade, models.Student.name)
-        .all()
-    )
+    students = sorted(cls.students, key=lambda s: (s.grade, s.name))
     return {
         "class_id": class_id,
         "class_name": cls.name,

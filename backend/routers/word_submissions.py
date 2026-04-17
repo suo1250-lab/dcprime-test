@@ -216,10 +216,8 @@ def _bg_grade(submission_id: int, image_path: str, items_data: list, student_nam
         try:
             db_student = db.query(Student).filter(Student.name == student_name).first()
             class_name = ""
-            if db_student and db_student.class_id:
-                cls = db.get(Class, db_student.class_id)
-                if cls:
-                    class_name = cls.name
+            if db_student and db_student.classes:
+                class_name = db_student.classes[0].name
             saved_items = db.query(WordSubmissionItem).filter(
                 WordSubmissionItem.submission_id == submission_id
             ).all()
@@ -445,9 +443,8 @@ def confirm_submission(sub_id: int, body: ReviewBody, db: Session = Depends(get_
         pdf_bytes = _build_marked_pdf(s)
         student   = db.query(Student).filter(Student.id == s.student_id).first()
         cls_name  = ""
-        if student:
-            cls = db.query(Class).filter(Class.id == student.class_id).first()
-            cls_name = cls.name if cls else ""
+        if student and student.classes:
+            cls_name = student.classes[0].name
         nas_path = _save_to_nas(pdf_bytes, s.student_name, cls_name)
         if nas_path:
             s.image_path = nas_path

@@ -4,7 +4,7 @@ from config import MAX_UPLOAD_EXCEL
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from database import get_db
 import models
 from models import MathSubmission
@@ -16,7 +16,7 @@ class StudentCreate(BaseModel):
     name: str
     grade: str
     school: Optional[str] = None
-    class_id: Optional[int] = None
+    class_ids: List[int] = []
     phone: Optional[str] = None
     teacher: Optional[str] = None
     historical_student_id: Optional[int] = None
@@ -27,7 +27,8 @@ class StudentOut(BaseModel):
     name: str
     grade: str
     school: Optional[str]
-    class_id: Optional[int]
+    class_ids: List[int]
+    class_names: List[str]
     phone: Optional[str]
     teacher: Optional[str]
     historical_student_id: Optional[int]
@@ -41,7 +42,7 @@ class PatchHistorical(BaseModel):
 
 
 class PatchClass(BaseModel):
-    class_id: Optional[int]
+    class_id: Optional[int]  # null = 전체 해제, 값 = 토글(있으면 제거, 없으면 추가)
 
 
 @router.get("", response_model=list[StudentOut])
@@ -53,13 +54,13 @@ def list_students(
     name: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    q = db.query(models.Student)
+    q = db.query(models.Student).options(joinedload(models.Student.classes))
     if grade:
         q = q.filter(models.Student.grade == grade)
     if school:
         q = q.filter(models.Student.school.ilike(f"%{school}%"))
     if class_id:
-        q = q.filter(models.Student.class_id == class_id)
+        q = q.filter(models.Student.classes.any(models.Class.id == class_id))
     if teacher:
         q = q.filter(models.Student.teacher == teacher)
     if name:
@@ -69,7 +70,13 @@ def list_students(
 
 @router.post("", response_model=StudentOut, status_code=201)
 def create_student(data: StudentCreate, db: Session = Depends(get_db)):
-    student = models.Student(**data.model_dump())
+    student = models.Student(
+        name=data.name, grade=data.grade, school=data.school,
+        phone=data.phone, teacher=data.teacher,
+        historical_student_id=data.historical_student_id,
+    )
+    if data.class_ids:
+        student.classes = db.query(models.Class).filter(models.Class.id.in_(data.class_ids)).all()
     db.add(student)
     db.commit()
     db.refresh(student)
@@ -81,8 +88,13 @@ def update_student(student_id: int, data: StudentCreate, db: Session = Depends(g
     student = db.get(models.Student, student_id)
     if not student:
         raise HTTPException(404, "학생을 찾을 수 없습니다")
-    for k, v in data.model_dump().items():
-        setattr(student, k, v)
+    student.name = data.name
+    student.grade = data.grade
+    student.school = data.school
+    student.phone = data.phone
+    student.teacher = data.teacher
+    student.historical_student_id = data.historical_student_id
+    student.classes = db.query(models.Class).filter(models.Class.id.in_(data.class_ids)).all()
     db.commit()
     db.refresh(student)
     return student
@@ -100,12 +112,20 @@ def patch_historical(student_id: int, body: PatchHistorical, db: Session = Depen
 
 @router.patch("/{student_id}/class")
 def patch_class(student_id: int, body: PatchClass, db: Session = Depends(get_db)):
-    student = db.get(models.Student, student_id)
+    student = db.query(models.Student).options(joinedload(models.Student.classes)).filter(models.Student.id == student_id).first()
     if not student:
         raise HTTPException(404, "학생을 찾을 수 없습니다")
-    student.class_id = body.class_id
+    if body.class_id is None:
+        student.classes = []
+    else:
+        cls = db.get(models.Class, body.class_id)
+        if cls:
+            if cls in student.classes:
+                student.classes.remove(cls)
+            else:
+                student.classes.append(cls)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "class_ids": student.class_ids}
 
 
 @router.delete("/{student_id}", status_code=204)
@@ -182,8 +202,6 @@ def get_student_profile(student_id: int, db: Session = Depends(get_db)):
             "memo":             t.memo,
         })
 
-    class_ = db.get(models.Class, student.class_id) if student.class_id else None
-
     # 수학 성적
     math_subs = db.query(MathSubmission).filter(
         MathSubmission.student_id == student_id,
@@ -224,8 +242,8 @@ def get_student_profile(student_id: int, db: Session = Depends(get_db)):
         "school":                student.school,
         "phone":                 student.phone,
         "teacher":               student.teacher,
-        "class_id":              student.class_id,
-        "class_name":            class_.name if class_ else None,
+        "class_ids":             student.class_ids,
+        "class_names":           student.class_names,
         "historical_student_id": student.historical_student_id,
         "test_results":          test_result_list,
         "historical":            historical_list,
@@ -306,21 +324,20 @@ async def import_students_excel(
         class_name_raw = col(row_dict, "반이름", "반")
 
         # 반 조회 또는 생성
-        class_id = None
+        new_cls = None
         if class_name_raw:
-            cls = db.query(models.Class).filter(
+            new_cls = db.query(models.Class).filter(
                 models.Class.name == class_name_raw,
                 models.Class.grade == grade,
             ).first()
-            if not cls:
+            if not new_cls:
                 # 과목은 기본값 "영어" (추후 컬럼 추가 가능)
-                cls = models.Class(name=class_name_raw, grade=grade, subject="영어")
-                db.add(cls)
+                new_cls = models.Class(name=class_name_raw, grade=grade, subject="영어")
+                db.add(new_cls)
                 db.flush()
-            class_id = cls.id
 
         # 학생 조회 (이름+학년 기준)
-        existing = db.query(models.Student).filter(
+        existing = db.query(models.Student).options(joinedload(models.Student.classes)).filter(
             models.Student.name  == name,
             models.Student.grade == grade,
         ).first()
@@ -329,17 +346,19 @@ async def import_students_excel(
             existing.school   = school   or existing.school
             existing.phone    = phone    or existing.phone
             existing.teacher  = teacher  or existing.teacher
-            if class_id:
-                existing.class_id = class_id
+            if new_cls and new_cls not in existing.classes:
+                existing.classes.append(new_cls)
             updated += 1
         else:
-            db.add(models.Student(
+            student = models.Student(
                 name=name, grade=grade,
                 school=school or None,
                 phone=phone or None,
                 teacher=teacher or None,
-                class_id=class_id,
-            ))
+            )
+            if new_cls:
+                student.classes = [new_cls]
+            db.add(student)
             created += 1
 
     try:

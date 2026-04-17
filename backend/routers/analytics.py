@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
 import models
+from models import student_classes
 from ai_utils import ai_text_call
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)```")
@@ -59,7 +60,8 @@ def question_stats(test_id: int, db: Session = Depends(get_db)):
         )
         .join(models.TestResult, models.QuestionResult.result_id == models.TestResult.id)
         .join(models.Student, models.TestResult.student_id == models.Student.id)
-        .outerjoin(models.Class, models.Student.class_id == models.Class.id)
+        .outerjoin(student_classes, student_classes.c.student_id == models.Student.id)
+        .outerjoin(models.Class, models.Class.id == student_classes.c.class_id)
         .filter(models.TestResult.test_id == test_id)
         .group_by(
             models.QuestionResult.question_no,
@@ -434,7 +436,10 @@ def confirm_assign(test_id: int, overrides: dict[int, int], db: Session = Depend
 
         student = db.get(models.Student, r.student_id)
         if student:
-            student.class_id = class_id
+            if class_id is not None:
+                cls = db.get(models.Class, class_id)
+                if cls and cls not in student.classes:
+                    student.classes.append(cls)
             updated.append({"student_id": r.student_id, "class_id": class_id})
 
     db.commit()

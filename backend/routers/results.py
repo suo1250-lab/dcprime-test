@@ -166,7 +166,7 @@ def export_excel(test_id: Optional[int] = None, student_id: Optional[int] = None
     import io
 
     q = db.query(models.TestResult).options(
-        joinedload(models.TestResult.student).joinedload(models.Student.class_),
+        joinedload(models.TestResult.student).subqueryload(models.Student.classes),
         joinedload(models.TestResult.test),
     )
     if test_id:
@@ -183,7 +183,7 @@ def export_excel(test_id: Optional[int] = None, student_id: Optional[int] = None
     for r in rows:
         student = r.student
         test    = r.test
-        class_name = student.class_.name if student and student.class_ else ""
+        class_name = student.classes[0].name if student and student.classes else ""
         pct = round(r.score / r.total * 100) if r.total else ""
         ws.append([
             student.name if student else "",

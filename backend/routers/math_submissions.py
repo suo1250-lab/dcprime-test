@@ -122,9 +122,8 @@ def list_submissions(
 
 
 def _bg_grade_math(submission_id: int, image_path: str, answers: list):
-    """백그라운드에서 OMR AI 채점"""
-    from ai_utils import ai_call
-    import json as _json
+    """백그라운드에서 OMR CV 채점 (OpenCV 마크 인식)"""
+    from omr_cv import grade_omr
 
     db = SessionLocal()
     try:
@@ -132,25 +131,16 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
         if not sub:
             return
 
-        num_questions = len(answers)
-        prompt = f"""이것은 수학 시험 OMR 답안지 이미지입니다.
-총 {num_questions}문항이 있으며, 각 문항에서 학생이 실제로 마킹(칠한)한 번호(1~5)를 정확히 읽어주세요.
-정답을 유추하지 말고, 이미지에서 실제로 마킹된 번호만 읽으세요.
-마킹이 여러 개면 가장 진하게 칠해진 번호를, 불분명하면 null로.
-반드시 아래 JSON 배열 형식으로만 응답하세요 (다른 텍스트 없이):
-[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}},...]"""
+        debug_dir = str(UPLOAD_DIR / "omr_debug")
+        result = grade_omr(image_path, len(answers), debug_dir=debug_dir)
+        student_answers = result["answers"]
 
-        text = ai_call(image_path, prompt, max_tokens=1000, fast=False)
-        m = _JSON_FENCE_RE.search(text)
-        if m:
-            text = m.group(1).strip()
-        results = _json.loads(text)
+        log.info(f"[MathSubmission] CV결과: sub_id={submission_id} flipped={result['flipped']} answers={student_answers}")
+        if result["flipped"]:
+            log.info(f"[MathSubmission] 좌우반전 감지 후 보정: sub_id={submission_id}")
 
         score = 0
-        for r in results:
-            qno = r["question_no"]
-            stu = r.get("student_answer")
-            cor = answers[qno - 1] if 0 < qno <= len(answers) else 0
+        for qno, (stu, cor) in enumerate(zip(student_answers, answers), 1):
             is_correct = (stu is not None and stu == cor)
             if is_correct:
                 score += 1
@@ -161,6 +151,7 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
                 correct_answer=cor,
                 is_correct=is_correct,
             ))
+
         sub.score = score
         sub.total = len(answers)
         sub.status = "graded"
@@ -178,9 +169,8 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
 
 
 def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
-    """합본 채점: 이미지에서 학생 이름 자동 인식 후 채점"""
-    from ai_utils import ai_call
-    import json as _json
+    """합본 채점: OMR CV로 학생 코드 인식 + 답안 채점"""
+    from omr_cv import grade_omr, decode_student_code
 
     db = SessionLocal()
     try:
@@ -188,35 +178,33 @@ def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
         if not sub:
             return
 
-        num_questions = len(answers)
-        prompt = f"""이것은 수학 시험 OMR 답안지 이미지입니다.
-1) 답안지에 적힌 학생 이름(이름란, 성명란)을 읽으세요.
-2) 총 {num_questions}문항에서 학생이 실제로 마킹(칠한)한 번호(1~5)를 정확히 읽으세요.
-정답을 유추하지 말고, 이미지에서 실제로 마킹된 번호만 읽으세요.
-마킹이 여러 개면 가장 진하게 칠해진 번호를, 불분명하면 null로.
-반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
-{{"student_name":"홍길동","answers":[{{"question_no":1,"student_answer":3}},{{"question_no":2,"student_answer":1}}]}}
-이름 인식 불가시 student_name=null"""
+        result = grade_omr(image_path, len(answers))
+        student_answers = result["answers"]
+        student_code = result["student_code"]
 
-        text = ai_call(image_path, prompt, max_tokens=1500, fast=False)
-        m = _JSON_FENCE_RE.search(text)
-        if m:
-            text = m.group(1).strip()
-        result = _json.loads(text)
+        if result["flipped"]:
+            log.info(f"[MathSubmission] 합본 좌우반전 감지 후 보정: sub_id={submission_id}")
 
-        detected_name = result.get("student_name")
-        if detected_name:
-            sub.student_name = detected_name
-            student = db.query(Student).filter(Student.name == detected_name).first()
+        # 학생 코드로 DB 조회 (학년/반/번호 매칭)
+        info = decode_student_code(student_code)
+        if info["class_no"] is not None and info["student_no"] is not None:
+            student = db.query(Student).filter(
+                Student.class_number == info["class_no"],
+                Student.student_number == info["student_no"],
+            ).first()
             if student:
                 sub.student_id = student.id
+                sub.student_name = student.name
+                log.info(f"[MathSubmission] 학생 코드 {student_code} → {student.name}")
+            else:
+                sub.student_name = f"코드:{student_code}"
+                log.warning(f"[MathSubmission] 학생 코드 {student_code} 매칭 실패")
+        else:
+            sub.student_name = f"코드:{student_code}"
+            log.warning(f"[MathSubmission] 학생 코드 인식 불완전: {student_code}")
 
-        results = result.get("answers", [])
         score = 0
-        for r in results:
-            qno = r["question_no"]
-            stu = r.get("student_answer")
-            cor = answers[qno - 1] if 0 < qno <= len(answers) else 0
+        for qno, (stu, cor) in enumerate(zip(student_answers, answers), 1):
             is_correct = (stu is not None and stu == cor)
             if is_correct:
                 score += 1
@@ -227,11 +215,12 @@ def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
                 correct_answer=cor,
                 is_correct=is_correct,
             ))
+
         sub.score = score
         sub.total = len(answers)
         sub.status = "graded"
         db.commit()
-        log.info(f"[MathSubmission] 합본채점완료: sub_id={submission_id} {detected_name} {score}/{len(answers)}")
+        log.info(f"[MathSubmission] 합본채점완료: sub_id={submission_id} {sub.student_name} {score}/{len(answers)}")
     except Exception as e:
         db.rollback()
         sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()

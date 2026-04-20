@@ -43,6 +43,23 @@ export default function MathBulkGradePage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [regradeTestId, setRegradeTestId] = useState("");
+  const [regrading, setRegrading] = useState(false);
+  const [regradeMsg, setRegradeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const regradeAll = async () => {
+    if (!regradeTestId || !confirm("선택한 시험의 모든 제출을 재채점합니다. 계속할까요?")) return;
+    setRegrading(true);
+    setRegradeMsg(null);
+    try {
+      const data = await apiFetch<{ queued: number }>(`/math-submissions/regrade-all?test_id=${regradeTestId}`, { method: "POST" });
+      setRegradeMsg({ type: "success", text: `${data.queued}개 재채점 시작됨. 잠시 후 결과 확인하세요.` });
+    } catch (e: unknown) {
+      setRegradeMsg({ type: "error", text: e instanceof Error ? e.message : "오류 발생" });
+    } finally {
+      setRegrading(false);
+    }
+  };
 
   useEffect(() => {
     apiFetch<MathTest[]>("/math-tests").then(setTests).catch(() => {});
@@ -136,6 +153,34 @@ export default function MathBulkGradePage() {
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
         여러 학생의 OMR 이미지를 한 번에 업로드하면 AI가 학생 이름과 마킹을 자동 인식하여 채점합니다.
       </p>
+
+      {/* 전체 재채점 */}
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-4 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">🔄 전체 재채점</span>
+          <span className="text-xs text-amber-600 dark:text-amber-500">OMR 인식 오류 발생 시 기존 제출 전체를 다시 채점합니다</span>
+        </div>
+        <div className="flex flex-wrap gap-3 items-center">
+          <select value={regradeTestId} onChange={(e) => setRegradeTestId(e.target.value)} className={inputCls + " w-56"}>
+            <option value="">시험 선택...</option>
+            {tests.filter((t) => t.has_answers).map((t) => (
+              <option key={t.id} value={t.id}>{t.title} ({t.grade})</option>
+            ))}
+          </select>
+          <button
+            onClick={regradeAll}
+            disabled={regrading || !regradeTestId}
+            className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            {regrading ? "재채점 중..." : "전체 재채점"}
+          </button>
+          {regradeMsg && (
+            <span className={`text-xs px-3 py-1.5 rounded-lg ${regradeMsg.type === "success" ? "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400" : "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400"}`}>
+              {regradeMsg.text}
+            </span>
+          )}
+        </div>
+      </div>
 
       <form onSubmit={upload} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 mb-6 shadow-sm">
         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">합본 OMR 업로드</p>

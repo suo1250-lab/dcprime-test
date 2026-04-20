@@ -341,6 +341,59 @@ def get_submission(sub_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/{sub_id}/regrade", status_code=202)
+def regrade_submission(sub_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """단일 제출 재채점 - 기존 items 삭제 후 OMR CV 재실행"""
+    s = db.query(MathSubmission).filter(MathSubmission.id == sub_id).first()
+    if not s:
+        raise HTTPException(404, "Not found")
+    if not s.image_path:
+        raise HTTPException(400, "이미지 파일 경로가 없습니다")
+    if not s.math_test or not s.math_test.answers:
+        raise HTTPException(400, "정답이 등록되지 않은 시험입니다")
+
+    # 기존 채점 결과 초기화
+    db.query(MathSubmissionItem).filter(MathSubmissionItem.submission_id == sub_id).delete()
+    s.status = "pending"
+    s.score = None
+    db.commit()
+
+    background_tasks.add_task(_bg_grade_math, sub_id, s.image_path, list(s.math_test.answers))
+    return {"id": sub_id, "status": "pending"}
+
+
+@router.post("/regrade-all", status_code=202)
+def regrade_all(test_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """특정 시험의 모든 제출 재채점"""
+    subs = db.query(MathSubmission).filter(
+        MathSubmission.math_test_id == test_id,
+        MathSubmission.image_path.isnot(None),
+    ).all()
+    if not subs:
+        raise HTTPException(404, "채점 대상 제출이 없습니다")
+
+    test = subs[0].math_test
+    if not test or not test.answers:
+        raise HTTPException(400, "정답이 없습니다")
+
+    count = 0
+    for s in subs:
+        if not s.image_path:
+            continue
+        db.query(MathSubmissionItem).filter(MathSubmissionItem.submission_id == s.id).delete()
+        s.status = "pending"
+        s.score = None
+        count += 1
+
+    db.commit()
+
+    for s in subs:
+        if s.image_path:
+            background_tasks.add_task(_bg_grade_math, s.id, s.image_path, list(test.answers))
+
+    return {"queued": count, "test_id": test_id}
+
+
 @router.delete("/{sub_id}", status_code=204)
 def delete_submission(sub_id: int, db: Session = Depends(get_db)):
     s = db.query(MathSubmission).filter(MathSubmission.id == sub_id).first()

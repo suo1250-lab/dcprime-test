@@ -326,14 +326,25 @@ export default function MathTestsPage() {
             {/* 정답 + 태그 등록 */}
             {expandedId === t.id && (
               <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-4 space-y-5">
-                {/* 정답 입력 */}
+                {/* 정답 + 배점 입력 */}
                 <div>
                   <div className="flex justify-between items-center mb-3">
-                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">정답 입력 (1~5)</span>
-                    <button onClick={saveAnswers} disabled={saving}
-                      className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                      {saving ? "저장 중..." : "정답 저장"}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">정답 입력 (1~5)</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
+                        배점 합계: {answers.map((_, idx) => parseFloat(pointWeights[idx + 1] || "0") || 0).reduce((a, b) => a + b, 0).toFixed(1)}점
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={savePointWeights} disabled={savingWeights}
+                        className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                        {savingWeights ? "저장 중..." : "배점 저장"}
+                      </button>
+                      <button onClick={saveAnswers} disabled={saving}
+                        className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                        {saving ? "저장 중..." : "정답 저장"}
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
                     {answers.map((ans, idx) => (
@@ -351,37 +362,14 @@ export default function MathTestsPage() {
                           <option value={0}>-</option>
                           {[1,2,3,4,5].map((n) => <option key={n} value={n}>{n}</option>)}
                         </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 배점 입력 */}
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <div>
-                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">문항별 배점</span>
-                      <span className="text-xs text-gray-400 dark:text-gray-500 ml-2">
-                        합계: {answers.map((_, idx) => parseFloat(pointWeights[idx + 1] || "0") || 0).reduce((a, b) => a + b, 0).toFixed(1)}점
-                      </span>
-                    </div>
-                    <button onClick={savePointWeights} disabled={savingWeights}
-                      className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                      {savingWeights ? "저장 중..." : "배점 저장"}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-                    {answers.map((_, idx) => (
-                      <div key={idx} className="flex flex-col items-center gap-1">
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{idx + 1}번</span>
                         <input
                           type="number"
                           min={0}
                           step={0.5}
                           value={pointWeights[idx + 1] ?? ""}
                           onChange={(e) => setPointWeights({ ...pointWeights, [idx + 1]: e.target.value })}
-                          placeholder="점"
-                          className="border border-gray-200 dark:border-gray-600 rounded-lg px-1 py-1 text-xs w-full text-center bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                          placeholder="배점"
+                          className="border border-orange-200 dark:border-orange-700/50 rounded-lg px-1 py-1 text-xs w-full text-center bg-orange-50 dark:bg-orange-900/20 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-400 placeholder:text-orange-300"
                         />
                       </div>
                     ))}

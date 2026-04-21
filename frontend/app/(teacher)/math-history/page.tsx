@@ -147,14 +147,15 @@ function MathHistoryContent() {
     ).join("") || "";
 
     // 오답 문항별 학습 가이드
+    const escHtml = (s: string) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     const studyGuideHtml = (s.items ?? [])
-      .filter(i => !i.is_correct && i.tip)
+      .filter(i => !i.is_correct && i.tip && !i.tip.includes("논술형"))
       .sort((a, b) => a.question_no - b.question_no)
       .map(i => `
         <div class="tip-card">
           <div class="tip-head">${i.question_no}번 문항</div>
-          ${i.tag ? `<div class="tip-concept">${i.tag}</div>` : ""}
-          <div class="tip-body">💡 ${i.tip}</div>
+          ${i.tag ? `<div class="tip-concept">${escHtml(i.tag)}</div>` : ""}
+          <div class="tip-body">💡 ${escHtml(i.tip!)}</div>
         </div>`
       ).join("");
 

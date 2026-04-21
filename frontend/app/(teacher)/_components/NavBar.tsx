@@ -3,7 +3,11 @@ import { useState, useRef } from "react";
 import Link from "next/link";
 import LogoutButton from "./LogoutButton";
 
-const menus = [
+type MenuItem = { href: string; label: string };
+type MenuGroup = { groupLabel: string; items: MenuItem[] };
+type Menu = { label: string; items?: MenuItem[]; groups?: MenuGroup[] };
+
+const menus: Menu[] = [
   {
     label: "입학테스트",
     items: [
@@ -38,16 +42,39 @@ const menus = [
   },
   {
     label: "분석리포트",
-    items: [
-      { href: "/word-tutoring", label: "튜터링 이력" },
-      { href: "/math-history", label: "수학 성적 추이" },
-      { href: "/math-history?tab=class", label: "반별 성적" },
-      { href: "/subject-analysis", label: "세부 분석" },
+    groups: [
+      {
+        groupLabel: "국어",
+        items: [
+          { href: "/math-history?subject=korean", label: "성적 추이" },
+          { href: "/math-history?subject=korean&tab=class", label: "반별 성적" },
+        ],
+      },
+      {
+        groupLabel: "수학",
+        items: [
+          { href: "/math-history", label: "성적 추이" },
+          { href: "/math-history?tab=class", label: "반별 성적" },
+        ],
+      },
+      {
+        groupLabel: "영어",
+        items: [
+          { href: "/word-tutoring", label: "튜터링 이력" },
+        ],
+      },
+      {
+        groupLabel: "과학",
+        items: [
+          { href: "/math-history?subject=science", label: "성적 추이" },
+          { href: "/math-history?subject=science&tab=class", label: "반별 성적" },
+        ],
+      },
     ],
   },
 ];
 
-function DropdownMenu({ label, items }: { label: string; items: { href: string; label: string }[] }) {
+function DropdownMenu({ label, items, groups }: { label: string; items?: MenuItem[]; groups?: MenuGroup[] }) {
   const [open, setOpen] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,13 +98,29 @@ function DropdownMenu({ label, items }: { label: string; items: { href: string; 
         </svg>
       </button>
       {open && (
-        <div className="absolute top-full left-0 z-50 bg-indigo-800 dark:bg-indigo-950 shadow-xl rounded-b-xl overflow-hidden min-w-36"
+        <div className="absolute top-full left-0 z-50 bg-indigo-800 dark:bg-indigo-950 shadow-xl rounded-b-xl overflow-hidden min-w-40"
           onMouseEnter={show} onMouseLeave={hide}>
-          {items.map((n) => (
+          {/* 일반 flat 항목 */}
+          {items?.map((n) => (
             <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
               className="block px-4 py-2.5 text-sm hover:bg-indigo-600 dark:hover:bg-indigo-800 transition-colors whitespace-nowrap">
               {n.label}
             </Link>
+          ))}
+          {/* 그룹별 항목 */}
+          {groups?.map((g, gi) => (
+            <div key={g.groupLabel}>
+              {gi > 0 && <div className="border-t border-indigo-600/50 mx-2" />}
+              <div className="px-4 pt-2 pb-1 text-xs font-bold text-indigo-300 uppercase tracking-wide">
+                {g.groupLabel}
+              </div>
+              {g.items.map((n) => (
+                <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
+                  className="block px-5 py-2 text-sm hover:bg-indigo-600 dark:hover:bg-indigo-800 transition-colors whitespace-nowrap">
+                  {n.label}
+                </Link>
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -98,7 +141,7 @@ export default function NavBar() {
         </Link>
         <div className="flex items-stretch border-r border-indigo-500/50">
           {menus.map((m) => (
-            <DropdownMenu key={m.label} label={m.label} items={m.items} />
+            <DropdownMenu key={m.label} label={m.label} items={m.items} groups={m.groups} />
           ))}
         </div>
         <div className="ml-auto flex items-center px-4">
@@ -137,12 +180,29 @@ export default function NavBar() {
                 </svg>
               </button>
               {mobileOpen === m.label && (
-                <div className="grid grid-cols-3 gap-1 px-4 pb-3">
-                  {m.items.map((n) => (
-                    <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
-                      className="text-sm py-2 px-3 rounded-lg hover:bg-indigo-600 transition-colors text-center">
-                      {n.label}
-                    </Link>
+                <div className="px-4 pb-3">
+                  {m.items && (
+                    <div className="grid grid-cols-3 gap-1">
+                      {m.items.map((n) => (
+                        <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
+                          className="text-sm py-2 px-3 rounded-lg hover:bg-indigo-600 transition-colors text-center">
+                          {n.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  {m.groups?.map((g, gi) => (
+                    <div key={g.groupLabel} className={gi > 0 ? "mt-2 pt-2 border-t border-indigo-500/30" : ""}>
+                      <div className="text-xs font-bold text-indigo-300 uppercase tracking-wide mb-1">{g.groupLabel}</div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {g.items.map((n) => (
+                          <Link key={n.href} href={n.href} onClick={() => setOpen(false)}
+                            className="text-sm py-2 px-3 rounded-lg hover:bg-indigo-600 transition-colors text-center">
+                            {n.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}

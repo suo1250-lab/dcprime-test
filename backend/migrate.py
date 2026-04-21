@@ -47,6 +47,35 @@ MIGRATIONS = [
         """,
         "sql": "ALTER TABLE math_tests ADD COLUMN tags JSONB DEFAULT '{}'",
     },
+    {
+        "name": "add_tips_to_math_tests",
+        "check": """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'math_tests' AND column_name = 'tips'
+        """,
+        "sql": "ALTER TABLE math_tests ADD COLUMN tips JSONB DEFAULT '{}'",
+    },
+    {
+        "name": "add_point_weights_to_math_tests",
+        "check": """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'math_tests' AND column_name = 'point_weights'
+        """,
+        "sql": "ALTER TABLE math_tests ADD COLUMN point_weights JSONB DEFAULT '{}'",
+    },
+    {
+        "name": "math_submissions_score_to_numeric",
+        "check": """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'math_submissions' AND column_name = 'score'
+            AND data_type IN ('numeric', 'real', 'double precision')
+        """,
+        "sql": """
+            ALTER TABLE math_submissions
+              ALTER COLUMN score TYPE NUMERIC(8,2) USING score::numeric,
+              ALTER COLUMN total TYPE NUMERIC(8,2) USING total::numeric
+        """,
+    },
 ]
 
 

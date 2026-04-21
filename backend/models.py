@@ -216,6 +216,7 @@ class MathTest(Base):
     answers = Column(JSON, nullable=False, default=[])
     tags = Column(JSON, nullable=True, default={})  # {question_no: tag} e.g. {"1": "함수", "2": "인수분해"}
     tips = Column(JSON, nullable=True, default={})  # {question_no: tip} e.g. {"1": "동류항 정리 반복 연습 필요"}
+    point_weights = Column(JSON, nullable=True, default={})  # {question_no: points} e.g. {"1": 3, "2": 3, "17": 4}
     source_file = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     submissions = relationship("MathSubmission", back_populates="math_test", cascade="all, delete-orphan")
@@ -228,8 +229,8 @@ class MathSubmission(Base):
     student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"), nullable=True)
     student_name = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="pending")
-    score = Column(Integer, nullable=True)
-    total = Column(Integer, nullable=True)
+    score = Column(Float, nullable=True)
+    total = Column(Float, nullable=True)
     image_path = Column(String(500), nullable=True)
     submitted_at = Column(DateTime(timezone=True), server_default=func.now())
     math_test = relationship("MathTest", back_populates="submissions")

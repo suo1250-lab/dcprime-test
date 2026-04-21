@@ -33,6 +33,10 @@ class TagsIn(BaseModel):
     tags: dict  # {"1": "함수", "2": "인수분해", ...}
 
 
+class PointWeightsIn(BaseModel):
+    point_weights: dict  # {"1": 3.0, "2": 3.0, ...}
+
+
 class MathTestOut(BaseModel):
     id: int
     title: str
@@ -42,6 +46,7 @@ class MathTestOut(BaseModel):
     has_answers: bool
     tags: dict = {}
     tips: dict = {}
+    point_weights: dict = {}
     class Config:
         from_attributes = True
 
@@ -60,7 +65,7 @@ def list_math_tests(db: Session = Depends(get_db)):
     return [MathTestOut(
         id=t.id, title=t.title, grade=t.grade, test_date=t.test_date,
         num_questions=t.num_questions, has_answers=_has_answers(t.answers or []),
-        tags=t.tags or {}, tips=t.tips or {}
+        tags=t.tags or {}, tips=t.tips or {}, point_weights=t.point_weights or {}
     ) for t in tests]
 
 
@@ -76,7 +81,7 @@ def create_math_test(body: MathTestIn, db: Session = Depends(get_db)):
     db.refresh(test)
     return MathTestOut(
         id=test.id, title=test.title, grade=test.grade, test_date=test.test_date,
-        num_questions=test.num_questions, has_answers=False, tags={}, tips={}
+        num_questions=test.num_questions, has_answers=False, tags={}, tips={}, point_weights={}
     )
 
 
@@ -102,7 +107,7 @@ def update_math_test(test_id: int, body: MathTestUpdate, db: Session = Depends(g
     return MathTestOut(
         id=test.id, title=test.title, grade=test.grade, test_date=test.test_date,
         num_questions=test.num_questions, has_answers=_has_answers(test.answers or []),
-        tags=test.tags or {}, tips=test.tips or {}
+        tags=test.tags or {}, tips=test.tips or {}, point_weights=test.point_weights or {}
     )
 
 
@@ -193,6 +198,24 @@ def update_tips(test_id: int, body: dict, db: Session = Depends(get_db)):
     if not test:
         raise HTTPException(404, "Not found")
     test.tips = body.get("tips", {})
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/{test_id}/point-weights")
+def get_point_weights(test_id: int, db: Session = Depends(get_db)):
+    test = db.query(MathTest).filter(MathTest.id == test_id).first()
+    if not test:
+        raise HTTPException(404, "Not found")
+    return {"point_weights": test.point_weights or {}}
+
+
+@router.put("/{test_id}/point-weights")
+def update_point_weights(test_id: int, body: PointWeightsIn, db: Session = Depends(get_db)):
+    test = db.query(MathTest).filter(MathTest.id == test_id).first()
+    if not test:
+        raise HTTPException(404, "Not found")
+    test.point_weights = body.point_weights
     db.commit()
     return {"ok": True}
 

@@ -36,8 +36,8 @@ class MathSubmissionOut(BaseModel):
     student_id: Optional[int]
     student_name: str
     status: str
-    score: Optional[int]
-    total: Optional[int]
+    score: Optional[float]
+    total: Optional[float]
     submitted_at: str
     class_avg: Optional[float] = None
     class_rank: Optional[int] = None
@@ -125,7 +125,20 @@ def list_submissions(
     return result
 
 
-def _bg_grade_math(submission_id: int, image_path: str, answers: list):
+def _calc_weighted_score(student_answers: list, answers: list, point_weights: dict):
+    """point_weights가 있으면 가중 점수, 없으면 raw count를 반환 (score, total)"""
+    use_weights = bool(point_weights)
+    score = 0.0
+    total = 0.0
+    for qno, (stu, cor) in enumerate(zip(student_answers, answers), 1):
+        w = float(point_weights.get(str(qno), 1)) if use_weights else 1.0
+        total += w
+        if stu is not None and stu == cor:
+            score += w
+    return score, total
+
+
+def _bg_grade_math(submission_id: int, image_path: str, answers: list, point_weights: dict = {}):
     """백그라운드에서 OMR CV 채점 (OpenCV 마크 인식)"""
     from omr_cv import grade_omr
 
@@ -143,24 +156,21 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
         if result["flipped"]:
             log.info(f"[MathSubmission] 좌우반전 감지 후 보정: sub_id={submission_id}")
 
-        score = 0
+        score, total = _calc_weighted_score(student_answers, answers, point_weights)
         for qno, (stu, cor) in enumerate(zip(student_answers, answers), 1):
-            is_correct = (stu is not None and stu == cor)
-            if is_correct:
-                score += 1
             db.add(MathSubmissionItem(
                 submission_id=submission_id,
                 question_no=qno,
                 student_answer=stu,
                 correct_answer=cor,
-                is_correct=is_correct,
+                is_correct=(stu is not None and stu == cor),
             ))
 
         sub.score = score
-        sub.total = len(answers)
+        sub.total = total
         sub.status = "graded"
         db.commit()
-        log.info(f"[MathSubmission] 채점완료: sub_id={submission_id} {score}/{len(answers)}")
+        log.info(f"[MathSubmission] 채점완료: sub_id={submission_id} {score}/{total}")
     except Exception as e:
         db.rollback()
         sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()
@@ -172,7 +182,7 @@ def _bg_grade_math(submission_id: int, image_path: str, answers: list):
         db.close()
 
 
-def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
+def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list, point_weights: dict = {}):
     """합본 채점: OMR CV로 학생 코드 인식 + 답안 채점"""
     from omr_cv import grade_omr, decode_student_code
 
@@ -207,24 +217,21 @@ def _bg_grade_math_bulk(submission_id: int, image_path: str, answers: list):
             sub.student_name = f"코드:{student_code}"
             log.warning(f"[MathSubmission] 학생 코드 인식 불완전: {student_code}")
 
-        score = 0
+        score, total = _calc_weighted_score(student_answers, answers, point_weights)
         for qno, (stu, cor) in enumerate(zip(student_answers, answers), 1):
-            is_correct = (stu is not None and stu == cor)
-            if is_correct:
-                score += 1
             db.add(MathSubmissionItem(
                 submission_id=submission_id,
                 question_no=qno,
                 student_answer=stu,
                 correct_answer=cor,
-                is_correct=is_correct,
+                is_correct=(stu is not None and stu == cor),
             ))
 
         sub.score = score
-        sub.total = len(answers)
+        sub.total = total
         sub.status = "graded"
         db.commit()
-        log.info(f"[MathSubmission] 합본채점완료: sub_id={submission_id} {sub.student_name} {score}/{len(answers)}")
+        log.info(f"[MathSubmission] 합본채점완료: sub_id={submission_id} {sub.student_name} {score}/{total}")
     except Exception as e:
         db.rollback()
         sub = db.query(MathSubmission).filter(MathSubmission.id == submission_id).first()
@@ -275,7 +282,7 @@ async def upload_bulk_omr(
         sub.image_path = str(img_path)
         db.commit()
 
-        background_tasks.add_task(_bg_grade_math_bulk, sub.id, str(img_path), list(test.answers))
+        background_tasks.add_task(_bg_grade_math_bulk, sub.id, str(img_path), list(test.answers), test.point_weights or {})
         created.append({"id": sub.id, "filename": image.filename})
 
     return {"created": len(created), "submissions": created}
@@ -320,7 +327,7 @@ async def upload_omr(
     sub.image_path = str(img_path)
     db.commit()
 
-    background_tasks.add_task(_bg_grade_math, sub.id, str(img_path), list(test.answers))
+    background_tasks.add_task(_bg_grade_math, sub.id, str(img_path), list(test.answers), test.point_weights or {})
     return {"id": sub.id, "status": "pending"}
 
 
@@ -364,7 +371,7 @@ def regrade_submission(sub_id: int, background_tasks: BackgroundTasks, db: Sessi
     s.score = None
     db.commit()
 
-    background_tasks.add_task(_bg_grade_math, sub_id, s.image_path, list(s.math_test.answers))
+    background_tasks.add_task(_bg_grade_math, sub_id, s.image_path, list(s.math_test.answers), s.math_test.point_weights or {})
     return {"id": sub_id, "status": "pending"}
 
 

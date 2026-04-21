@@ -14,6 +14,7 @@ interface MathTest {
   has_answers: boolean;
   tags: Record<string, string>;
   tips: Record<string, string>;
+  point_weights: Record<string, number>;
 }
 
 export default function MathTestsPage() {
@@ -32,6 +33,8 @@ export default function MathTestsPage() {
   const [analyzeMsg, setAnalyzeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const paperInputRef = useRef<HTMLInputElement>(null);
   const [tips, setTips] = useState<Record<number, string>>({});
+  const [pointWeights, setPointWeights] = useState<Record<number, string>>({});
+  const [savingWeights, setSavingWeights] = useState(false);
 
   const load = () => {
     apiFetch<MathTest[]>("/math-tests").then(setTests).catch(() => {});
@@ -52,7 +55,7 @@ export default function MathTestsPage() {
   };
 
   const toggleExpand = async (t: MathTest) => {
-    if (expandedId === t.id) { setExpandedId(null); setAnswers([]); setTags({}); setTips({}); setAnalyzeMsg(null); return; }
+    if (expandedId === t.id) { setExpandedId(null); setAnswers([]); setTags({}); setTips({}); setPointWeights({}); setAnalyzeMsg(null); return; }
     setExpandedId(t.id);
     setAnalyzeMsg(null);
     try {
@@ -82,6 +85,17 @@ export default function MathTestsPage() {
       setTips(numericTips);
     } catch {
       setTips({});
+    }
+    // 배점 로드
+    try {
+      const pwData = await apiFetch<{ point_weights: Record<string, number> }>(`/math-tests/${t.id}/point-weights`);
+      const numericWeights: Record<number, string> = {};
+      for (const [k, v] of Object.entries(pwData.point_weights || {})) {
+        numericWeights[Number(k)] = String(v);
+      }
+      setPointWeights(numericWeights);
+    } catch {
+      setPointWeights({});
     }
   };
 
@@ -130,6 +144,27 @@ export default function MathTestsPage() {
     }
   };
 
+  const savePointWeights = async () => {
+    if (!expandedId) return;
+    setSavingWeights(true);
+    try {
+      const strWeights: Record<string, number> = {};
+      for (const [k, v] of Object.entries(pointWeights)) {
+        const n = parseFloat(v);
+        if (!isNaN(n) && n > 0) strWeights[String(k)] = n;
+      }
+      await apiFetch(`/math-tests/${expandedId}/point-weights`, {
+        method: "PUT",
+        body: JSON.stringify({ point_weights: strWeights }),
+      });
+      load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "배점 저장 실패");
+    } finally {
+      setSavingWeights(false);
+    }
+  };
+
   const analyzePaper = async (testId: number) => {
     const file = paperInputRef.current?.files?.[0];
     if (!file) return;
@@ -173,7 +208,7 @@ export default function MathTestsPage() {
         alert(e instanceof Error ? e.message : "삭제 실패");
       }
     }
-    if (expandedId === id) { setExpandedId(null); setAnswers([]); setTags({}); }
+    if (expandedId === id) { setExpandedId(null); setAnswers([]); setTags({}); setPointWeights({}); }
     load();
   };
 
@@ -273,6 +308,11 @@ export default function MathTestsPage() {
                       태그 {Object.keys(t.tags).length}개
                     </span>
                   )}
+                  {Object.keys(t.point_weights || {}).length > 0 && (
+                    <span className="text-xs bg-orange-50 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-full">
+                      배점 {Object.values(t.point_weights).reduce((a, b) => a + b, 0).toFixed(0)}점
+                    </span>
+                  )}
                   <span className="text-xs text-indigo-400 dark:text-indigo-500 ml-auto">{expandedId === t.id ? "▲ 접기" : "▼ 정답/태그 등록"}</span>
                 </button>
                 <button onClick={() => startEditMeta(t)}
@@ -311,6 +351,38 @@ export default function MathTestsPage() {
                           <option value={0}>-</option>
                           {[1,2,3,4,5].map((n) => <option key={n} value={n}>{n}</option>)}
                         </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 배점 입력 */}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <div>
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">문항별 배점</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 ml-2">
+                        합계: {answers.map((_, idx) => parseFloat(pointWeights[idx + 1] || "0") || 0).reduce((a, b) => a + b, 0).toFixed(1)}점
+                      </span>
+                    </div>
+                    <button onClick={savePointWeights} disabled={savingWeights}
+                      className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                      {savingWeights ? "저장 중..." : "배점 저장"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
+                    {answers.map((_, idx) => (
+                      <div key={idx} className="flex flex-col items-center gap-1">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{idx + 1}번</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={pointWeights[idx + 1] ?? ""}
+                          onChange={(e) => setPointWeights({ ...pointWeights, [idx + 1]: e.target.value })}
+                          placeholder="점"
+                          className="border border-gray-200 dark:border-gray-600 rounded-lg px-1 py-1 text-xs w-full text-center bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        />
                       </div>
                     ))}
                   </div>

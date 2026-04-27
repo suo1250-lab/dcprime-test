@@ -13,6 +13,7 @@ interface StudentItem { id: number; name: string; grade: string; }
 interface MathSub {
   id: number; test_title: string; test_date: string | null;
   status: string; score: number | null; total: number | null;
+  subjective_score: number | null; subjective_max: number | null;
   class_avg: number | null; class_rank: number | null; class_total: number | null;
   items?: { question_no: number; is_correct: boolean; tag: string | null }[];
 }
@@ -21,6 +22,25 @@ const selectCls = "border border-gray-200 dark:border-gray-600 rounded-lg px-3 p
 const card = "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm";
 
 function shorten(s: string) { return s.length > 10 ? s.slice(0, 10) + "…" : s; }
+
+function calcTotalPct(score: number, total: number, sub_score: number | null, sub_max: number | null) {
+  if (sub_max != null && sub_max > 0)
+    return Math.round(((score + (sub_score ?? 0)) / (total + sub_max)) * 100);
+  return Math.round((score / total) * 100);
+}
+
+function formatScoreCell(s: MathSub) {
+  if (s.score == null || s.total == null) return "-";
+  if (!s.subjective_max) return `${s.score}/${s.total}`;
+  const sub = s.subjective_score ?? 0;
+  const tot = s.score + sub;
+  if (s.items && s.items.length > 0) {
+    const correct = s.items.filter(i => i.is_correct).length;
+    const n = s.items.length;
+    return `객관식 ${correct}/${n}문항(${s.score}점) + 서술형 ${sub}점 = 합계 ${tot}점`;
+  }
+  return `객관식 ${s.score}점 + 서술형 ${sub}점 = 합계 ${tot}점`;
+}
 
 const SECTION_HEADER = "flex items-center gap-2 mb-4";
 const EMPTY_BOX = card + " py-10 text-center text-sm text-gray-400 dark:text-gray-500";
@@ -54,9 +74,10 @@ function MathSubjectSection({ subject, subs, color }: {
   const chartData = subs.map((s) => ({
     name: shorten(s.test_title ?? ""),
     fullName: s.test_title,
-    pct: s.score != null && s.total ? Math.round((s.score / s.total) * 100) : 0,
+    pct: s.score != null && s.total ? calcTotalPct(s.score, s.total, s.subjective_score, s.subjective_max) : 0,
     avgPct: s.class_avg != null ? Math.round(s.class_avg) : null,
     score: s.score, total: s.total,
+    subjective_score: s.subjective_score, subjective_max: s.subjective_max,
     rank: s.class_rank, rankTotal: s.class_total,
   }));
 
@@ -152,14 +173,14 @@ function MathSubjectSection({ subject, subs, color }: {
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
             {subs.map((s) => {
-              const pct = s.score != null && s.total ? Math.round((s.score / s.total) * 100) : null;
+              const pct = s.score != null && s.total ? calcTotalPct(s.score, s.total, s.subjective_score, s.subjective_max) : null;
               const avgPct = s.class_avg != null ? Math.round(s.class_avg) : null;
               const d = pct != null && avgPct != null ? pct - avgPct : null;
               return (
                 <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
                   <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-100">{s.test_title}</td>
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">{s.test_date ?? "-"}</td>
-                  <td className={`px-4 py-3 font-bold ${color.badge}`}>{s.score}/{s.total}</td>
+                  <td className={`px-4 py-3 font-bold text-xs ${color.badge}`}>{formatScoreCell(s)}</td>
                   <td className="px-4 py-3">{pct != null && <span className={`font-semibold ${pct >= 80 ? "text-emerald-600 dark:text-emerald-400" : pct >= 60 ? "text-orange-500" : "text-red-500"}`}>{pct}%</span>}</td>
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{avgPct != null ? <span>{avgPct}% {d != null && <span className={`text-xs ml-1 ${d >= 0 ? "text-emerald-600" : "text-red-500"}`}>({d >= 0 ? "▲" : "▼"}{Math.abs(d)})</span>}</span> : "-"}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{s.class_rank != null && s.class_total != null ? `${s.class_rank}/${s.class_total}등` : "-"}</td>

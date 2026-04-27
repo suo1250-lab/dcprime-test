@@ -15,11 +15,12 @@ interface MathTest {
   tags: Record<string, string>;
   tips: Record<string, string>;
   point_weights: Record<string, number>;
+  subjective_max: number | null;
 }
 
 export default function MathTestsPage() {
   const [tests, setTests] = useState<MathTest[]>([]);
-  const [form, setForm] = useState({ title: "", grade: "중1", test_date: "", num_questions: 20 });
+  const [form, setForm] = useState({ title: "", grade: "중1", test_date: "", num_questions: 20, subjective_max: "" });
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -27,7 +28,7 @@ export default function MathTestsPage() {
   const [saving, setSaving] = useState(false);
   const [savingTags, setSavingTags] = useState(false);
   const [editingMeta, setEditingMeta] = useState<number | null>(null);
-  const [metaForm, setMetaForm] = useState({ title: "", grade: "중1", test_date: "", num_questions: 20 });
+  const [metaForm, setMetaForm] = useState({ title: "", grade: "중1", test_date: "", num_questions: 20, subjective_max: "" });
   const [savingMeta, setSavingMeta] = useState(false);
   const [analyzingPaper, setAnalyzingPaper] = useState(false);
   const [analyzeMsg, setAnalyzeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -46,8 +47,9 @@ export default function MathTestsPage() {
     e.preventDefault();
     setError("");
     try {
-      await apiFetch("/math-tests", { method: "POST", body: JSON.stringify(form) });
-      setForm({ title: "", grade: "중1", test_date: "", num_questions: 20 });
+      const payload = { ...form, subjective_max: form.subjective_max ? parseFloat(form.subjective_max) : null };
+      await apiFetch("/math-tests", { method: "POST", body: JSON.stringify(payload) });
+      setForm({ title: "", grade: "중1", test_date: "", num_questions: 20, subjective_max: "" });
       load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "오류가 발생했습니다");
@@ -214,13 +216,14 @@ export default function MathTestsPage() {
 
   const startEditMeta = (t: MathTest) => {
     setEditingMeta(t.id);
-    setMetaForm({ title: t.title, grade: t.grade, test_date: t.test_date, num_questions: t.num_questions });
+    setMetaForm({ title: t.title, grade: t.grade, test_date: t.test_date, num_questions: t.num_questions, subjective_max: t.subjective_max != null ? String(t.subjective_max) : "" });
   };
 
   const saveMeta = async (id: number) => {
     setSavingMeta(true);
     try {
-      await apiFetch(`/math-tests/${id}`, { method: "PUT", body: JSON.stringify(metaForm) });
+      const payload = { ...metaForm, subjective_max: metaForm.subjective_max ? parseFloat(metaForm.subjective_max) : null };
+      await apiFetch(`/math-tests/${id}`, { method: "PUT", body: JSON.stringify(payload) });
       setEditingMeta(null);
       load();
     } catch (e: unknown) {
@@ -258,6 +261,13 @@ export default function MathTestsPage() {
           <input required type="date" value={form.test_date} onChange={(e) => setForm({ ...form, test_date: e.target.value })}
             className={inputCls} />
         </div>
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">서술형 만점 (선택)</label>
+          <input type="number" min={0} step={0.5} value={form.subjective_max}
+            onChange={(e) => setForm({ ...form, subjective_max: e.target.value })}
+            placeholder="예: 20"
+            className={inputCls + " w-24"} />
+        </div>
         <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
           시험 생성
         </button>
@@ -285,6 +295,13 @@ export default function MathTestsPage() {
                   className={inputCls + " w-20"} />
                 <input type="date" value={metaForm.test_date} onChange={(e) => setMetaForm({ ...metaForm, test_date: e.target.value })}
                   className={inputCls} />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-400 dark:text-gray-500">서술형:</span>
+                  <input type="number" min={0} step={0.5} value={metaForm.subjective_max}
+                    onChange={(e) => setMetaForm({ ...metaForm, subjective_max: e.target.value })}
+                    placeholder="만점"
+                    className={inputCls + " w-20"} />
+                </div>
                 <button onClick={() => saveMeta(t.id)} disabled={savingMeta}
                   className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                   {savingMeta ? "저장 중..." : "저장"}
@@ -311,6 +328,11 @@ export default function MathTestsPage() {
                   {Object.keys(t.point_weights || {}).length > 0 && (
                     <span className="text-xs bg-orange-50 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-full">
                       배점 {Object.values(t.point_weights).reduce((a, b) => a + b, 0).toFixed(0)}점
+                    </span>
+                  )}
+                  {t.subjective_max != null && (
+                    <span className="text-xs bg-pink-50 dark:bg-pink-900/40 text-pink-600 dark:text-pink-400 px-2 py-0.5 rounded-full">
+                      서술형 {t.subjective_max}점
                     </span>
                   )}
                   <span className="text-xs text-indigo-400 dark:text-indigo-500 ml-auto">{expandedId === t.id ? "▲ 접기" : "▼ 정답/태그 등록"}</span>

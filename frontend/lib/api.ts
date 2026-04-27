@@ -44,6 +44,7 @@ export interface StudentProfile {
     id: number; test_title: string; test_date: string | null;
     score: number | null; total: number | null; score_pct: number | null;
     class_avg: number | null; class_rank: number | null; class_total: number;
+    subjective_score: number | null; subjective_max: number | null;
   }[];
 }
 export interface Test {

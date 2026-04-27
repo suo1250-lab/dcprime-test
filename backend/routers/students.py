@@ -262,6 +262,8 @@ def get_student_profile(student_id: int, db: Session = Depends(get_db)):
             "class_avg": avg,
             "class_rank": rank,
             "class_total": len(scores),
+            "subjective_score": float(ms.subjective_score) if ms.subjective_score is not None else None,
+            "subjective_max": float(ms.math_test.subjective_max) if ms.math_test and ms.math_test.subjective_max is not None else None,
         })
 
     return {

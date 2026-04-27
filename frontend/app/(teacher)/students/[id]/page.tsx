@@ -274,16 +274,26 @@ export default function StudentProfilePage() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {(profile.math_results ?? []).map((r) => {
-                  const diff = r.score_pct != null && r.class_avg != null ? Math.round(r.score_pct - r.class_avg) : null;
+                  const effPct = r.score != null && r.total != null
+                    ? (r.subjective_max != null && r.subjective_max > 0
+                        ? Math.round(((r.score + (r.subjective_score ?? 0)) / (r.total + r.subjective_max)) * 100)
+                        : r.score_pct != null ? Math.round(r.score_pct) : null)
+                    : null;
+                  const diff = effPct != null && r.class_avg != null ? Math.round(effPct - r.class_avg) : null;
+                  const scoreDisplay = r.score != null && r.total != null
+                    ? (r.subjective_max != null
+                        ? `객관식 ${r.score}pt + 서술형 ${r.subjective_score ?? 0}pt = ${r.score + (r.subjective_score ?? 0)}pt`
+                        : `${r.score}/${r.total}`)
+                    : "-";
                   return (
                     <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className={tdCls + " font-medium"}>{r.test_title}</td>
                       <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{r.test_date ?? "-"}</td>
-                      <td className={tdCls}>{r.score != null && r.total != null ? `${r.score}/${r.total}` : "-"}</td>
+                      <td className={tdCls + " text-xs"}>{scoreDisplay}</td>
                       <td className={tdCls}>
-                        {r.score_pct != null && (
-                          <span className={`font-semibold ${r.score_pct >= 80 ? "text-green-600 dark:text-green-400" : r.score_pct >= 60 ? "text-yellow-600 dark:text-yellow-400" : "text-red-500 dark:text-red-400"}`}>
-                            {Math.round(r.score_pct)}%
+                        {effPct != null && (
+                          <span className={`font-semibold ${effPct >= 80 ? "text-green-600 dark:text-green-400" : effPct >= 60 ? "text-yellow-600 dark:text-yellow-400" : "text-red-500 dark:text-red-400"}`}>
+                            {effPct}%
                           </span>
                         )}
                       </td>

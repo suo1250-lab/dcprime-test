@@ -16,10 +16,12 @@ interface MathTest {
 interface MathSubmission {
   id: number;
   student_name: string;
-  test_id: number;
+  math_test_id: number;
   test_title: string;
   score: number;
   total: number;
+  subjective_score: number | null;
+  subjective_max: number | null;
   status: "pending" | "graded" | "error";
   submitted_at: string;
 }
@@ -45,6 +47,7 @@ export default function MathSubmissionsPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<MathSubmissionDetail | null>(null);
   const [filterTest, setFilterTest] = useState("");
+  const [subjectiveEdits, setSubjectiveEdits] = useState<Record<number, string>>({});
 
   const load = () => {
     apiFetch<MathTest[]>("/math-tests").then(setTests).catch(() => {});
@@ -98,6 +101,17 @@ export default function MathSubmissionsPage() {
     }
     if (expandedId === id) { setExpandedId(null); setDetail(null); }
     load();
+  };
+
+  const saveSubjective = async (id: number, val: string) => {
+    const score = val.trim() === "" ? null : parseFloat(val);
+    try {
+      await apiFetch(`/math-submissions/${id}/subjective`, {
+        method: "PATCH",
+        body: JSON.stringify({ subjective_score: isNaN(score as number) ? null : score }),
+      });
+      load();
+    } catch { /* silent */ }
   };
 
   const statusBadge = (status: MathSubmission["status"]) => {
@@ -170,11 +184,32 @@ export default function MathSubmissionsPage() {
                 <span className="text-xs text-gray-500 dark:text-gray-400">{s.test_title}</span>
                 {statusBadge(s.status)}
                 {s.status === "graded" && (
-                  <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{s.score}/{s.total}</span>
+                  <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                    {s.subjective_max != null
+                      ? `${s.score}pt + 서술형 ${s.subjective_score ?? "?"}pt`
+                      : `${s.score}/${s.total}`}
+                  </span>
                 )}
                 <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">{s.submitted_at}</span>
                 <span className="text-xs text-indigo-400 dark:text-indigo-500">{expandedId === s.id ? "▲" : "▼"}</span>
               </button>
+              {s.status === "graded" && s.subjective_max != null && (
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-xs text-pink-500 dark:text-pink-400 whitespace-nowrap">서술형 /{s.subjective_max}pt</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={s.subjective_max}
+                    step={0.5}
+                    value={subjectiveEdits[s.id] ?? (s.subjective_score != null ? String(s.subjective_score) : "")}
+                    onChange={(e) => setSubjectiveEdits({ ...subjectiveEdits, [s.id]: e.target.value })}
+                    onBlur={(e) => saveSubjective(s.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
+                    placeholder="점수"
+                    className="border border-pink-200 dark:border-pink-700 rounded px-2 py-0.5 text-xs w-16 text-center bg-pink-50 dark:bg-pink-900/20 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                  />
+                </div>
+              )}
               <button onClick={() => deleteSubmission(s.id)} className="text-xs text-red-500 dark:text-red-400 hover:underline font-medium">삭제</button>
             </div>
 

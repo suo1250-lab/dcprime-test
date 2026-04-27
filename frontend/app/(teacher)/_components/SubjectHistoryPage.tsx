@@ -19,6 +19,8 @@ interface MathSubmissionDetail {
   test_date: string;
   score: number;
   total: number;
+  subjective_score: number | null;
+  subjective_max: number | null;
   status: string;
   student_name: string;
   class_avg: number | null;
@@ -35,6 +37,28 @@ interface MathSubmissionDetail {
 }
 
 export type Subject = "수학" | "국어" | "영어" | "과학";
+
+// 서술형이 있을 때 실질 점수 퍼센트 계산
+function calcTotalPct(score: number, total: number, subjective_score: number | null, subjective_max: number | null) {
+  if (subjective_max != null && subjective_max > 0) {
+    return Math.round(((score + (subjective_score ?? 0)) / (total + subjective_max)) * 100);
+  }
+  return Math.round((score / total) * 100);
+}
+
+// 점수 셀 텍스트 (서술형 포함 시 상세 형식)
+function formatScoreCell(s: MathSubmissionDetail) {
+  if (s.score == null || s.total == null) return "-";
+  if (!s.subjective_max) return `${s.score}/${s.total}`;
+  const sub = s.subjective_score ?? 0;
+  const total = s.score + sub;
+  if (s.items && s.items.length > 0) {
+    const correct = s.items.filter(i => i.is_correct).length;
+    const n = s.items.length;
+    return `객관식 ${correct}/${n}문항(${s.score}점) + 서술형 ${sub}점 = 합계 ${total}점`;
+  }
+  return `객관식 ${s.score}점 + 서술형 ${sub}점 = 합계 ${total}점`;
+}
 
 export function subjectMatch(title: string, subject: Subject) {
   if (subject === "국어") return title.includes("국어");
@@ -85,7 +109,7 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
 
   // 성적 추이 데이터
   const trendData = graded.map((s) => {
-    const pct = Math.round((s.score / s.total) * 100);
+    const pct = calcTotalPct(s.score, s.total, s.subjective_score, s.subjective_max);
     const classAvgPct = s.class_avg != null ? Math.round(s.class_avg) : null;
     return {
       name: (s.test_title ?? "").length > 8 ? (s.test_title ?? "").slice(0, 8) + "…" : (s.test_title ?? ""),
@@ -95,6 +119,8 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
       classAvgPct,
       score: s.score,
       total: s.total,
+      subjective_score: s.subjective_score,
+      subjective_max: s.subjective_max,
       rank: s.class_rank,
       rankTotal: s.class_total,
     };
@@ -130,17 +156,18 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
 
   // 반별 뷰 계산
   const classGraded = classSubmissions;
+  const classPct = (r: MathSubmissionDetail) => calcTotalPct(r.score, r.total, r.subjective_score, r.subjective_max);
   const classAvgPct = classGraded.length > 0
-    ? Math.round(classGraded.reduce((s, r) => s + Math.round((r.score / r.total) * 100), 0) / classGraded.length)
+    ? Math.round(classGraded.reduce((s, r) => s + classPct(r), 0) / classGraded.length)
     : null;
-  const classMax = classGraded.length > 0 ? Math.max(...classGraded.map((r) => Math.round((r.score / r.total) * 100))) : null;
-  const classMin = classGraded.length > 0 ? Math.min(...classGraded.map((r) => Math.round((r.score / r.total) * 100))) : null;
-  const classSorted = [...classGraded].sort((a, b) => (b.score / b.total) - (a.score / a.total));
+  const classMax = classGraded.length > 0 ? Math.max(...classGraded.map(classPct)) : null;
+  const classMin = classGraded.length > 0 ? Math.min(...classGraded.map(classPct)) : null;
+  const classSorted = [...classGraded].sort((a, b) => classPct(b) - classPct(a));
 
   // 점수 분포 (10점 단위)
   const distMap: Record<string, number> = {};
   classGraded.forEach((r) => {
-    const band = `${Math.floor(Math.round((r.score / r.total) * 100) / 10) * 10}점대`;
+    const band = `${Math.floor(classPct(r) / 10) * 10}점대`;
     distMap[band] = (distMap[band] ?? 0) + 1;
   });
   const distData = Array.from({ length: 10 }, (_, i) => ({
@@ -168,7 +195,7 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
 
   // 개별 리포트 HTML
   const buildReportHtml = (s: MathSubmissionDetail, rank: number, total: number, avgPct: number | null) => {
-    const pct = Math.round((s.score / s.total) * 100);
+    const pct = calcTotalPct(s.score, s.total, s.subjective_score, s.subjective_max);
     const diffVal = avgPct != null ? pct - avgPct : null;
     const wrong = s.items?.filter((i) => !i.is_correct).map((i) => i.question_no).sort((a, b) => a - b) ?? [];
     const today = new Date().toLocaleDateString("ko-KR");
@@ -242,8 +269,15 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
     <div class="info-item"><b>시험일</b>${s.test_date}</div>
   </div>
   <div class="section-title">성적 분석</div>
+  ${s.subjective_max != null ? `
+  <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:14px;color:#374151;">
+    <span style="font-weight:600;">객관식</span> ${s.items ? `${s.items.filter((i:{is_correct:boolean})=>i.is_correct).length}/${s.items.length}문항` : ""}(${s.score}점)
+    &nbsp;+&nbsp;<span style="font-weight:600;">서술형</span> ${s.subjective_score ?? 0}점
+    &nbsp;=&nbsp;<span style="font-weight:700;color:#7c3aed;">합계 ${s.score + (s.subjective_score ?? 0)}점</span>
+    <span style="color:#9ca3af;font-size:12px;margin-left:8px;">(객관식 만점 ${s.total}점 + 서술형 만점 ${s.subjective_max}점)</span>
+  </div>` : ""}
   <div class="score-grid">
-    <div class="score-card"><div class="label">점수</div><div class="value blue">${s.score}<span style="font-size:14px;font-weight:400">/${s.total}</span></div></div>
+    <div class="score-card"><div class="label">점수</div><div class="value blue">${s.score + (s.subjective_max != null ? (s.subjective_score ?? 0) : 0)}<span style="font-size:14px;font-weight:400">/${s.total + (s.subjective_max ?? 0)}점</span></div></div>
     <div class="score-card"><div class="label">정답률</div><div class="value ${pct >= 80 ? "green" : pct >= 60 ? "orange" : "red"}">${pct}%</div></div>
     <div class="score-card"><div class="label">반 평균</div><div class="value orange">${avgPct != null ? avgPct + "%" : "-"}</div></div>
     <div class="score-card"><div class="label">석차</div><div class="value blue">${rank}<span style="font-size:14px;font-weight:400">/${total}등</span></div></div>
@@ -407,14 +441,16 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                       {classSorted.map((s, idx) => {
-                        const pct = Math.round((s.score / s.total) * 100);
+                        const pct = classPct(s);
                         const d = classAvgPct != null ? pct - classAvgPct : null;
                         const wrong = s.items?.filter((i) => !i.is_correct).map((i) => i.question_no).sort((a, b) => a - b) ?? [];
                         return (
                           <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                             <td className="px-4 py-3 font-bold text-gray-700 dark:text-gray-200">{idx + 1}등</td>
                             <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-100">{s.student_name}</td>
-                            <td className="px-4 py-3 font-bold text-orange-600 dark:text-orange-400">{s.score}/{s.total}</td>
+                            <td className="px-4 py-3 font-bold text-orange-600 dark:text-orange-400 text-xs">
+                              {formatScoreCell(s)}
+                            </td>
                             <td className="px-4 py-3">
                               <span className={`font-bold ${pct >= 80 ? "text-green-600 dark:text-green-400" : pct >= 60 ? "text-orange-500" : "text-red-500"}`}>{pct}%</span>
                             </td>
@@ -615,13 +651,19 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
                         </thead>
                         <tbody>
                           {graded.map((s) => {
-                            const pct = Math.round((s.score / s.total) * 100);
+                            const pct = calcTotalPct(s.score, s.total, s.subjective_score, s.subjective_max);
                             const avg = s.class_avg != null ? Math.round(s.class_avg) : null;
                             const d = avg != null ? pct - avg : null;
+                            const totalScore = s.score + (s.subjective_max != null ? (s.subjective_score ?? 0) : 0);
+                            const maxScore = s.total + (s.subjective_max ?? 0);
                             return (
                               <tr key={s.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
                                 <td style={{ padding: "8px", color: "#374151", fontWeight: "500", textAlign: "left" }}>{s.test_title}</td>
-                                <td style={{ padding: "8px", fontWeight: "bold", color: "#2563eb" }}>{s.score}<span style={{ fontWeight: "normal", fontSize: "11px" }}>점</span></td>
+                                <td style={{ padding: "8px", fontWeight: "bold", color: "#2563eb" }}>
+                                  {s.subjective_max != null
+                                    ? <>{totalScore}<span style={{ fontWeight: "normal", fontSize: "11px" }}>/{maxScore}점</span></>
+                                    : <>{s.score}<span style={{ fontWeight: "normal", fontSize: "11px" }}>점</span></>}
+                                </td>
                                 <td style={{ padding: "8px", color: "#6b7280" }}>{avg != null ? `${avg}%` : "-"}</td>
                                 <td style={{ padding: "8px", fontWeight: "500", color: d != null ? (d >= 0 ? "#16a34a" : "#dc2626") : "#6b7280" }}>
                                   {d != null ? `${d >= 0 ? "▲" : "▼"} ${Math.abs(d)}` : "-"}

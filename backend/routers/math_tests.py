@@ -3,7 +3,7 @@ from pathlib import Path
 from config import UPLOAD_DIR
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import date
 from database import get_db
 from models import MathTest
@@ -16,6 +16,7 @@ class MathTestIn(BaseModel):
     grade: str
     test_date: date
     num_questions: int = 0
+    subjective_max: Optional[float] = None
 
 
 class MathTestUpdate(BaseModel):
@@ -23,6 +24,7 @@ class MathTestUpdate(BaseModel):
     grade: str
     test_date: date
     num_questions: int
+    subjective_max: Optional[float] = None
 
 
 class AnswersIn(BaseModel):
@@ -47,6 +49,7 @@ class MathTestOut(BaseModel):
     tags: dict = {}
     tips: dict = {}
     point_weights: dict = {}
+    subjective_max: Optional[float] = None
     class Config:
         from_attributes = True
 
@@ -65,7 +68,8 @@ def list_math_tests(db: Session = Depends(get_db)):
     return [MathTestOut(
         id=t.id, title=t.title, grade=t.grade, test_date=t.test_date,
         num_questions=t.num_questions, has_answers=_has_answers(t.answers or []),
-        tags=t.tags or {}, tips=t.tips or {}, point_weights=t.point_weights or {}
+        tags=t.tags or {}, tips=t.tips or {}, point_weights=t.point_weights or {},
+        subjective_max=float(t.subjective_max) if t.subjective_max is not None else None,
     ) for t in tests]
 
 
@@ -74,14 +78,15 @@ def create_math_test(body: MathTestIn, db: Session = Depends(get_db)):
     test = MathTest(
         title=body.title, grade=body.grade,
         test_date=body.test_date, num_questions=body.num_questions,
-        answers=[],
+        answers=[], subjective_max=body.subjective_max,
     )
     db.add(test)
     db.commit()
     db.refresh(test)
     return MathTestOut(
         id=test.id, title=test.title, grade=test.grade, test_date=test.test_date,
-        num_questions=test.num_questions, has_answers=False, tags={}, tips={}, point_weights={}
+        num_questions=test.num_questions, has_answers=False, tags={}, tips={}, point_weights={},
+        subjective_max=float(test.subjective_max) if test.subjective_max is not None else None,
     )
 
 
@@ -93,6 +98,7 @@ def update_math_test(test_id: int, body: MathTestUpdate, db: Session = Depends(g
     test.title = body.title
     test.grade = body.grade
     test.test_date = body.test_date
+    test.subjective_max = body.subjective_max
     if body.num_questions != test.num_questions:
         test.num_questions = body.num_questions
         # 정답 배열 길이 맞춤
@@ -107,7 +113,8 @@ def update_math_test(test_id: int, body: MathTestUpdate, db: Session = Depends(g
     return MathTestOut(
         id=test.id, title=test.title, grade=test.grade, test_date=test.test_date,
         num_questions=test.num_questions, has_answers=_has_answers(test.answers or []),
-        tags=test.tags or {}, tips=test.tips or {}, point_weights=test.point_weights or {}
+        tags=test.tags or {}, tips=test.tips or {}, point_weights=test.point_weights or {},
+        subjective_max=float(test.subjective_max) if test.subjective_max is not None else None,
     )
 
 

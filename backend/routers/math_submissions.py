@@ -38,6 +38,8 @@ class MathSubmissionOut(BaseModel):
     status: str
     score: Optional[float]
     total: Optional[float]
+    subjective_score: Optional[float] = None
+    subjective_max: Optional[float] = None
     submitted_at: str
     class_avg: Optional[float] = None
     class_rank: Optional[int] = None
@@ -59,6 +61,8 @@ def _build_out(s: MathSubmission, class_avg=None, class_rank=None, class_total=N
         "status": s.status,
         "score": s.score,
         "total": s.total,
+        "subjective_score": float(s.subjective_score) if s.subjective_score is not None else None,
+        "subjective_max": float(s.math_test.subjective_max) if s.math_test and s.math_test.subjective_max is not None else None,
         "submitted_at": str(s.submitted_at),
         "class_avg": class_avg,
         "class_rank": class_rank,
@@ -405,6 +409,21 @@ def regrade_all(test_id: int, background_tasks: BackgroundTasks, db: Session = D
             background_tasks.add_task(_bg_grade_math, s.id, s.image_path, list(test.answers))
 
     return {"queued": count, "test_id": test_id}
+
+
+class SubjectiveScoreIn(BaseModel):
+    subjective_score: Optional[float] = None
+
+
+@router.patch("/{sub_id}/subjective")
+def update_subjective_score(sub_id: int, body: SubjectiveScoreIn, db: Session = Depends(get_db)):
+    s = db.query(MathSubmission).filter(MathSubmission.id == sub_id).first()
+    if not s:
+        raise HTTPException(404, "Not found")
+    s.subjective_score = body.subjective_score
+    db.commit()
+    db.refresh(s)
+    return {"id": s.id, "subjective_score": float(s.subjective_score) if s.subjective_score is not None else None}
 
 
 @router.delete("/{sub_id}", status_code=204)

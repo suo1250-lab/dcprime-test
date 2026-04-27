@@ -76,6 +76,16 @@ MIGRATIONS = [
               ALTER COLUMN total TYPE NUMERIC(8,2) USING total::numeric
         """,
     },
+    {
+        "name": "add_subjective_max_to_math_tests",
+        "check": "SELECT column_name FROM information_schema.columns WHERE table_name='math_tests' AND column_name='subjective_max'",
+        "sql": "ALTER TABLE math_tests ADD COLUMN subjective_max NUMERIC(8,2) DEFAULT NULL",
+    },
+    {
+        "name": "add_subjective_score_to_math_submissions",
+        "check": "SELECT column_name FROM information_schema.columns WHERE table_name='math_submissions' AND column_name='subjective_score'",
+        "sql": "ALTER TABLE math_submissions ADD COLUMN subjective_score NUMERIC(8,2) DEFAULT NULL",
+    },
 ]
 
 

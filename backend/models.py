@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, Float, ForeignKey, DateTime, UniqueConstraint, Table
+from sqlalchemy import Column, Integer, String, Boolean, Date, JSON, Float, Numeric, ForeignKey, DateTime, UniqueConstraint, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -217,6 +217,7 @@ class MathTest(Base):
     tags = Column(JSON, nullable=True, default={})  # {question_no: tag} e.g. {"1": "함수", "2": "인수분해"}
     tips = Column(JSON, nullable=True, default={})  # {question_no: tip} e.g. {"1": "동류항 정리 반복 연습 필요"}
     point_weights = Column(JSON, nullable=True, default={})  # {question_no: points} e.g. {"1": 3, "2": 3, "17": 4}
+    subjective_max = Column(Numeric(8, 2), nullable=True)
     source_file = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     submissions = relationship("MathSubmission", back_populates="math_test", cascade="all, delete-orphan")
@@ -232,6 +233,7 @@ class MathSubmission(Base):
     score = Column(Float, nullable=True)
     total = Column(Float, nullable=True)
     image_path = Column(String(500), nullable=True)
+    subjective_score = Column(Numeric(8, 2), nullable=True)
     submitted_at = Column(DateTime(timezone=True), server_default=func.now())
     math_test = relationship("MathTest", back_populates="submissions")
     items = relationship("MathSubmissionItem", back_populates="submission", cascade="all, delete-orphan", order_by="MathSubmissionItem.question_no")

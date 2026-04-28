@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import date
 from database import get_db
-from models import MathTest
+from models import MathTest, MathSubmission, MathSubmissionItem
 
 router = APIRouter(prefix="/math-tests", tags=["math-tests"])
 
@@ -138,10 +138,38 @@ def update_answers(test_id: int, body: AnswersIn, db: Session = Depends(get_db))
     test = db.query(MathTest).filter(MathTest.id == test_id).first()
     if not test:
         raise HTTPException(404, "Not found")
-    test.answers = body.answers
-    test.num_questions = len(body.answers)
+    new_answers = body.answers
+    test.answers = new_answers
+    test.num_questions = len(new_answers)
     db.commit()
-    return {"ok": True}
+
+    # 이미 채점된 제출들의 correct_answer / is_correct / score 재계산
+    answer_map = {i + 1: ans for i, ans in enumerate(new_answers)}
+    pw = test.point_weights or {}
+    subs = db.query(MathSubmission).filter(
+        MathSubmission.math_test_id == test_id,
+        MathSubmission.status == "graded",
+    ).all()
+    regrade_count = 0
+    for sub in subs:
+        score = 0.0
+        total = 0.0
+        for item in sub.items:
+            correct = answer_map.get(item.question_no)
+            if correct is not None:
+                item.correct_answer = correct
+                item.is_correct = bool(item.student_answer and item.student_answer == correct)
+            w = float(pw.get(str(item.question_no), 1)) if pw else 1.0
+            total += w
+            if item.is_correct:
+                score += w
+        sub.score = score
+        sub.total = total
+        regrade_count += 1
+    if regrade_count:
+        db.commit()
+
+    return {"ok": True, "regraded": regrade_count}
 
 
 @router.get("/{test_id}/tags")

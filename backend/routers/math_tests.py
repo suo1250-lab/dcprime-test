@@ -50,6 +50,7 @@ class MathTestOut(BaseModel):
     tips: dict = {}
     point_weights: dict = {}
     subjective_max: Optional[float] = None
+    tendency: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -70,6 +71,7 @@ def list_math_tests(db: Session = Depends(get_db)):
         num_questions=t.num_questions, has_answers=_has_answers(t.answers or []),
         tags=t.tags or {}, tips=t.tips or {}, point_weights=t.point_weights or {},
         subjective_max=float(t.subjective_max) if t.subjective_max is not None else None,
+        tendency=t.tendency,
     ) for t in tests]
 
 
@@ -87,6 +89,7 @@ def create_math_test(body: MathTestIn, db: Session = Depends(get_db)):
         id=test.id, title=test.title, grade=test.grade, test_date=test.test_date,
         num_questions=test.num_questions, has_answers=False, tags={}, tips={}, point_weights={},
         subjective_max=float(test.subjective_max) if test.subjective_max is not None else None,
+        tendency=None,
     )
 
 
@@ -115,6 +118,7 @@ def update_math_test(test_id: int, body: MathTestUpdate, db: Session = Depends(g
         num_questions=test.num_questions, has_answers=_has_answers(test.answers or []),
         tags=test.tags or {}, tips=test.tips or {}, point_weights=test.point_weights or {},
         subjective_max=float(test.subjective_max) if test.subjective_max is not None else None,
+        tendency=test.tendency,
     )
 
 
@@ -223,6 +227,16 @@ def update_point_weights(test_id: int, body: PointWeightsIn, db: Session = Depen
     if not test:
         raise HTTPException(404, "Not found")
     test.point_weights = body.point_weights
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/{test_id}/tendency")
+def update_tendency(test_id: int, body: dict, db: Session = Depends(get_db)):
+    test = db.query(MathTest).filter(MathTest.id == test_id).first()
+    if not test:
+        raise HTTPException(404, "Not found")
+    test.tendency = body.get("tendency", None)
     db.commit()
     return {"ok": True}
 

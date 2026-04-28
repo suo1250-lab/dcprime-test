@@ -28,6 +28,7 @@ interface MathSubmissionDetail {
   class_avg: number | null;
   class_rank: number | null;
   class_total: number | null;
+  tendency: string | null;
   items?: {
     question_no: number;
     student_answer: number | null;
@@ -292,11 +293,13 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
     <div class="score-card"><div class="label">석차</div><div class="value blue">${rank}<span style="font-size:14px;font-weight:400">/${total}등</span></div></div>
   </div>
   ${diffVal != null ? `<p style="margin-top:12px;font-size:13px;color:${diffVal >= 0 ? "#16a34a" : "#dc2626"};font-weight:600;">반 평균 대비: ${diffVal >= 0 ? "▲" : "▼"} ${Math.abs(diffVal)}%p</p>` : ""}
+  ${s.tendency ? `
+  <div class="section-title">출제경향</div>
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px;font-size:13px;color:#374151;line-height:1.7;white-space:pre-wrap;">${escHtml(s.tendency)}</div>` : ""}
   <div class="section-title">문항별 결과</div>
   <div class="bar-wrap">${barItems}</div>
   <div style="margin-top:16px;"><p style="font-size:13px;color:#374151;margin-bottom:6px;"><b>오답 문항</b></p><div>${wrongRows}</div></div>
   ${weakTagHtml ? `<div style="margin-top:16px;"><p style="font-size:13px;color:#374151;margin-bottom:6px;"><b>취약 유형</b></p><div>${weakTagHtml}</div></div>` : ""}
-  ${studyGuideHtml ? `<div class="section-title">📚 오답 문항 학습 가이드</div>${studyGuideHtml}` : ""}
   <button class="print-btn" onclick="window.print()">인쇄 / PDF 저장</button>
 </div></body></html>`;
   };

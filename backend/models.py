@@ -218,6 +218,7 @@ class MathTest(Base):
     tips = Column(JSON, nullable=True, default={})  # {question_no: tip} e.g. {"1": "동류항 정리 반복 연습 필요"}
     point_weights = Column(JSON, nullable=True, default={})  # {question_no: points} e.g. {"1": 3, "2": 3, "17": 4}
     subjective_max = Column(Numeric(8, 2), nullable=True)
+    tendency = Column(Text, nullable=True)  # 출제경향 텍스트
     source_file = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     submissions = relationship("MathSubmission", back_populates="math_test", cascade="all, delete-orphan")

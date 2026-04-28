@@ -83,6 +83,7 @@ def _build_out(s: MathSubmission, class_avg=None, class_rank=None, class_total=N
         "objective_total": obj_total,
         "subjective_score": float(s.subjective_score) if s.subjective_score is not None else None,
         "subjective_max": float(s.math_test.subjective_max) if s.math_test and s.math_test.subjective_max is not None else None,
+        "tendency": s.math_test.tendency if s.math_test else None,
         "submitted_at": str(s.submitted_at),
         "class_avg": class_avg,
         "class_rank": class_rank,

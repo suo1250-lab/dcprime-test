@@ -86,6 +86,11 @@ MIGRATIONS = [
         "check": "SELECT column_name FROM information_schema.columns WHERE table_name='math_submissions' AND column_name='subjective_score'",
         "sql": "ALTER TABLE math_submissions ADD COLUMN subjective_score NUMERIC(8,2) DEFAULT NULL",
     },
+    {
+        "name": "add_tendency_to_math_tests",
+        "check": "SELECT column_name FROM information_schema.columns WHERE table_name='math_tests' AND column_name='tendency'",
+        "sql": "ALTER TABLE math_tests ADD COLUMN tendency TEXT DEFAULT NULL",
+    },
 ]
 
 

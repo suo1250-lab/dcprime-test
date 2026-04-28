@@ -16,6 +16,7 @@ interface MathTest {
   tips: Record<string, string>;
   point_weights: Record<string, number>;
   subjective_max: number | null;
+  tendency: string | null;
 }
 
 export default function MathTestsPage() {
@@ -38,6 +39,8 @@ export default function MathTestsPage() {
   const [savingWeights, setSavingWeights] = useState(false);
   const [expandedSubjMax, setExpandedSubjMax] = useState<string>("");
   const [savingSubjMax, setSavingSubjMax] = useState(false);
+  const [tendency, setTendency] = useState<string>("");
+  const [savingTendency, setSavingTendency] = useState(false);
 
   const load = () => {
     apiFetch<MathTest[]>("/math-tests").then(setTests).catch(() => {});
@@ -59,10 +62,11 @@ export default function MathTestsPage() {
   };
 
   const toggleExpand = async (t: MathTest) => {
-    if (expandedId === t.id) { setExpandedId(null); setAnswers([]); setTags({}); setTips({}); setPointWeights({}); setAnalyzeMsg(null); setExpandedSubjMax(""); return; }
+    if (expandedId === t.id) { setExpandedId(null); setAnswers([]); setTags({}); setTips({}); setPointWeights({}); setAnalyzeMsg(null); setExpandedSubjMax(""); setTendency(""); return; }
     setExpandedId(t.id);
     setAnalyzeMsg(null);
     setExpandedSubjMax(t.subjective_max != null ? String(t.subjective_max) : "");
+    setTendency(t.tendency ?? "");
     try {
       const d = await apiFetch<{ answers: number[] }>(`/math-tests/${t.id}/answers`);
       setAnswers(d.answers.length > 0 ? d.answers : Array(t.num_questions).fill(0));
@@ -166,6 +170,22 @@ export default function MathTestsPage() {
       alert(e instanceof Error ? e.message : "저장 실패");
     } finally {
       setSavingSubjMax(false);
+    }
+  };
+
+  const saveTendency = async () => {
+    if (!expandedId) return;
+    setSavingTendency(true);
+    try {
+      await apiFetch(`/math-tests/${expandedId}/tendency`, {
+        method: "PUT",
+        body: JSON.stringify({ tendency: tendency.trim() || null }),
+      });
+      load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "저장 실패");
+    } finally {
+      setSavingTendency(false);
     }
   };
 
@@ -505,25 +525,25 @@ export default function MathTestsPage() {
                   </div>
                 </div>
 
-                {/* 문항별 학습팁 (AI 생성 or 수동) */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">문항별 학습 가이드</span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">오답 시 리포트에 표시되는 학습 조언</span>
+                {/* 출제경향 */}
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <div>
+                      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">출제경향</span>
+                      <span className="text-xs text-amber-500 dark:text-amber-500 ml-2">리포트의 성적 분석과 문항별 결과 사이에 표시됩니다</span>
+                    </div>
+                    <button onClick={saveTendency} disabled={savingTendency}
+                      className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                      {savingTendency ? "저장 중..." : "저장"}
+                    </button>
                   </div>
-                  <div className="space-y-1.5">
-                    {answers.map((_, idx) => (
-                      <div key={idx} className="flex items-start gap-2">
-                        <span className="text-xs text-gray-400 dark:text-gray-500 w-8 pt-1.5 shrink-0">{idx + 1}번</span>
-                        <input
-                          value={tips[idx + 1] ?? ""}
-                          onChange={(e) => setTips({ ...tips, [idx + 1]: e.target.value })}
-                          placeholder="학습 조언 (AI 분석 후 자동 입력됨)"
-                          className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 text-xs bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-violet-500"
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  <textarea
+                    value={tendency}
+                    onChange={(e) => setTendency(e.target.value)}
+                    rows={4}
+                    placeholder="이번 시험의 출제경향을 입력하세요. 리포트에 그대로 표시됩니다."
+                    className="w-full border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                  />
                 </div>
               </div>
             )}

@@ -314,7 +314,7 @@ function SubjectHistoryContent({ subject }: { subject: Subject }) {
     return `<div class="section-title">문항별 오답률 (전체 응시자 기준)</div>
   <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
     <p style="font-size:11px;color:#9ca3af;margin-bottom:12px;">해당 시험을 응시한 학생 전체의 문항별 오답 비율 / 파란 테두리: 내가 틀린 문항</p>
-    <div style="display:flex;align-items:flex-end;gap:4px;flex-wrap:wrap;">${bars}</div>
+    <div style="overflow-x:auto;padding-bottom:4px;"><div style="display:flex;align-items:flex-end;gap:4px;flex-wrap:nowrap;min-width:max-content;">${bars}</div></div>
     ${highWrong ? `<div style="margin-top:12px;"><span style="font-size:12px;color:#374151;font-weight:600;">오답률 50% 이상: </span>${highWrong}</div>` : ""}
   </div>`;
   })() : ""}
